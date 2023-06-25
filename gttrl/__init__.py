@@ -77,7 +77,6 @@ def main():
     skip_update = args.skip_update
     print_play_cookie = args.print_play_cookie
     enable_log = args.enable_log
-    gttrl = Gttrl(username, password, game_path, enable_log)
     if (username and not password) or (password and not username):
         raise Exception("Username and password must be provided together")
     elif (play_cookie and not game_server) or (game_server and not play_cookie):
@@ -90,6 +89,7 @@ def main():
             raise Exception(
                 "Account file does not exist and no others forms of authentication were provided"
             )
+    gttrl = Gttrl(username, password, game_path, enable_log)
     if username:
         print("Logging in...")
         play_cookie, game_server = gttrl.get_play_cookie()
