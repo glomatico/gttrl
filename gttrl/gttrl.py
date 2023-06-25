@@ -104,20 +104,21 @@ class Gttrl:
         toon_guard_token: str = "",
         queue_token: str = "",
     ):
-        data = {
-            "username": self.username,
-            "password": self.password,
+        data = {}
+        params = {
+            "format": "json",
         }
         if toon_guard_input:
-            data["appToken"] = toon_guard_input
-            data["authToken"] = toon_guard_token
+            params["appToken"] = toon_guard_input
+            params["authToken"] = toon_guard_token
+        else:
+            data["username"] = self.username
+            data["password"] = self.password
         if queue_token:
             data["queueToken"] = queue_token
         response = self.session.post(
             "https://www.toontownrewritten.com/api/login",
-            params={
-                "format": "json",
-            },
+            params=params,
             data=data,
         )
         response.raise_for_status()
@@ -130,21 +131,22 @@ class Gttrl:
         login_response = self.login_request()
         if (
             login_response["success"] == "partial"
-            and login_response["banner"] == "Please enter an authenticator token."
+            and login_response["banner"]
+            == "Please check your email for a ToonGuard code and enter it below."
         ):
-            toon_guard_input = input(
-                "Enter your Toon Guard code received in your account email: "
-            )
-            login_response = self.login_request(
-                toon_guard_input=toon_guard_input,
-                toon_guard_token=login_response["responseToken"],
-            )
-        if login_response["success"] == "delayed":
-            while login_response["success"] == "delayed":
-                login_response = self.login_request(
-                    queue_token=login_response["queueToken"]
+            while login_response["success"] == "partial":
+                toon_guard_input = input(
+                    "Enter your Toon Guard code received in your account email: "
                 )
-                time.sleep(5)
+                login_response = self.login_request(
+                    toon_guard_input=toon_guard_input,
+                    toon_guard_token=login_response["responseToken"],
+                )
+        while login_response["success"] == "delayed":
+            login_response = self.login_request(
+                queue_token=login_response["queueToken"]
+            )
+            time.sleep(5)
         return login_response["cookie"], login_response["gameserver"]
 
     def launch_game(self, play_cookie, game_server):
