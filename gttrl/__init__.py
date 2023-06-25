@@ -82,7 +82,7 @@ def main():
     elif (play_cookie and not game_server) or (game_server and not play_cookie):
         raise Exception("Play cookie and game server must be provided together")
     else:
-        if Path(account_file).exists():
+        if Path(account_file).exists() and not username and not play_cookie:
             with open(account_file, "r") as file:
                 username, password = file.read().splitlines()
         elif not username and not play_cookie:
