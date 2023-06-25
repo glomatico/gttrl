@@ -26,10 +26,10 @@ class Gttrl:
         self.session = Session()
         self.os = sys.platform
         if self.os == "win32" and platform.architecture()[0] == "64bit":
-            self.game_exe = "TTREngine64.exe"
+            self.game_exe = "./TTREngine64.exe"
             self.os = "win64"
         elif self.os == "win32":
-            self.game_exe = "TTREngine.exe"
+            self.game_exe = "./TTREngine.exe"
         elif self.os == "darwin":
             self.game_exe = "./Toontown Rewritten"
         elif self.os == "linux" or self.os == "linux2":
