@@ -1,5 +1,6 @@
 import bz2
 import hashlib
+import json
 import os
 import platform
 import subprocess
@@ -73,10 +74,11 @@ class Gttrl:
         return hasher.hexdigest()
 
     def download_game_files(self):
+        if not self.game_path.exists():
+            self.game_path.mkdir(parents=True, exist_ok=True)
         manifest = self.session.get(
             "https://cdn.toontownrewritten.com/content/patchmanifest.txt"
         ).json()
-        self.game_path.mkdir(parents=True, exist_ok=True)
         keys = list(manifest.keys())
         for key in keys:
             if self.os not in manifest[key]["only"]:
@@ -161,9 +163,36 @@ class Gttrl:
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
-            os.chmod(self.game_exe, 0o755)
+            if not os.access(self.game_exe, os.X_OK):
+                os.chmod(self.game_exe, 0o755)
             subprocess.Popen(
                 [self.game_exe],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+
+
+class Config:
+    def __init__(self):
+        self.config_path = Path.home() / ".gttrl"
+        self.config_location = self.config_path / "config.json"
+
+    def create_if_not_exists(self):
+        if not self.config_path.exists():
+            self.config_path.mkdir(parents=True, exist_ok=True)
+        if not self.config_location.exists():
+            with open(self.config_location, "w") as f:
+                json.dump(
+                    {
+                        "game_path": str(self.config_path / "Toontown Rewritten"),
+                        "skip_update": False,
+                        "enable_log": False,
+                        "account_file": str(self.config_path / "account.txt"),
+                    },
+                    f,
+                    indent=4,
+                )
+
+    def read_config_file(self):
+        with open(self.config_location, "r") as f:
+            return json.load(f)

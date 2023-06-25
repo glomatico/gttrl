@@ -1,15 +1,15 @@
 import argparse
+import getpass
 from pathlib import Path
 
-from .gttrl import Gttrl
+from .gttrl import Config, Gttrl
 
-__version__ = "1.0"
+__version__ = "1.1"
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Glomatico's Toontown Rewritten Launcher",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "-u",
@@ -24,13 +24,11 @@ def main():
     parser.add_argument(
         "-a",
         "--account-file",
-        default="./account.txt",
         help="Account file location",
     )
     parser.add_argument(
-        "-f",
+        "-m",
         "--game-path",
-        default="./Toontown Rewritten",
         help="Game path",
     )
     parser.add_argument(
@@ -59,7 +57,7 @@ def main():
         "-e",
         "--enable-log",
         action="store_true",
-        help="Enable log",
+        help="Enable logging to the console",
     )
     parser.add_argument(
         "-v",
@@ -68,15 +66,18 @@ def main():
         version=f"%(prog)s {__version__}",
     )
     args = parser.parse_args()
+    config = Config()
+    config.create_if_not_exists()
+    config_file = config.read_config_file()
     username = args.username
     password = args.password
-    account_file = args.account_file
-    game_path = args.game_path
+    account_file = args.account_file or config_file["account_file"]
+    game_path = args.game_path or config_file["game_path"]
     play_cookie = args.play_cookie
     game_server = args.game_server
-    skip_update = args.skip_update
+    skip_update = args.skip_update or config_file["skip_update"]
     print_play_cookie = args.print_play_cookie
-    enable_log = args.enable_log
+    enable_log = args.enable_log or config_file["enable_log"]
     if (username and not password) or (password and not username):
         raise Exception("Username and password must be provided together")
     elif (play_cookie and not game_server) or (game_server and not play_cookie):
@@ -86,9 +87,8 @@ def main():
             with open(account_file, "r") as file:
                 username, password = file.read().splitlines()
         elif not username and not play_cookie:
-            raise Exception(
-                "Account file does not exist and no others forms of authentication were provided"
-            )
+            username = input("Username: ")
+            password = getpass.getpass("Password: ")
     gttrl = Gttrl(username, password, game_path, enable_log)
     if username:
         print("Logging in...")
