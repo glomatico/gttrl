@@ -1,0 +1,22 @@
+[project]
+name = "gttrl"
+description = "Glomatico's Toontown Rewritten Launcher"
+requires-python = ">=3.7"
+authors = [{name = "glomatico"}]
+dependencies = [
+    "requests",
+    "tqdm",
+]
+readme = "README.md"
+dynamic = ["version"]
+
+[project.urls]
+homepage = "https://github.com/glomatico/gttrl"
+repository = "https://github.com/glomatico/gttrl"
+
+[build-system]
+requires = ["flit_core"]
+build-backend = "flit_core.buildapi"
+
+[project.scripts]
+gttrl = "gttrl:main"
