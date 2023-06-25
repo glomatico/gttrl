@@ -154,7 +154,7 @@ class Gttrl:
         os.environ["TTR_GAMESERVER"] = game_server
         os.chdir(self.game_path)
         if self.enable_log:
-            subprocess.call([self.game_exe], shell=True)
+            subprocess.call([self.game_exe])
         elif self.os == "win32" or self.os == "win64":
             subprocess.Popen(
                 [self.game_exe],
