@@ -31,9 +31,9 @@ class Gttrl:
         elif self.os == "win32":
             self.game_exe = "TTREngine.exe"
         elif self.os == "darwin":
-            self.game_exe = "Toontown Rewritten"
+            self.game_exe = "./Toontown Rewritten"
         elif self.os == "linux" or self.os == "linux2":
-            self.game_exe = "TTREngine"
+            self.game_exe = "./TTREngine"
         else:
             raise Exception("Unsupported OS")
 
@@ -155,5 +155,15 @@ class Gttrl:
         os.chdir(self.game_path)
         if self.enable_log:
             subprocess.call([self.game_exe], shell=True)
+        elif self.os == "win32" or self.os == "win64":
+            subprocess.Popen(
+                [self.game_exe],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
         else:
-            subprocess.Popen([self.game_exe], creationflags=subprocess.CREATE_NO_WINDOW)
+            os.chmod(self.game_exe, 0o755)
+            subprocess.Popen(
+                [self.game_exe],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
