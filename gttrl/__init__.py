@@ -69,36 +69,34 @@ def main():
     config = Config()
     config.create_if_not_exists()
     config_file = config.read_config_file()
-    username = args.username
-    password = args.password
-    account_file = args.account_file or config_file["account_file"]
-    game_path = args.game_path or config_file["game_path"]
-    play_cookie = args.play_cookie
-    game_server = args.game_server
-    skip_update = args.skip_update or config_file["skip_update"]
-    print_play_cookie = args.print_play_cookie
-    enable_log = args.enable_log or config_file["enable_log"]
-    if (username and not password) or (password and not username):
-        raise Exception("Username and password must be provided together")
-    elif (play_cookie and not game_server) or (game_server and not play_cookie):
-        raise Exception("Play cookie and game server must be provided together")
+    username, password = None, None
+    if Path(config_file["account_file"]).exists():
+        with open(config_file["account_file"]) as f:
+            username, password = f.read().splitlines()
+    elif args.account_file:
+        with open(args.account_file, "w") as f:
+            f.write(f"{username}\n{password}")
+    elif not args.play_cookie and not args.game_server:
+        username = args.username or input("Username: ")
+        password = args.password or getpass.getpass("Password: ")
     else:
-        if Path(account_file).exists() and not username and not play_cookie:
-            with open(account_file, "r") as file:
-                username, password = file.read().splitlines()
-        elif not username and not play_cookie:
-            username = input("Username: ")
-            password = getpass.getpass("Password: ")
-    gttrl = Gttrl(username, password, game_path, enable_log)
+        play_cookie = args.play_cookie or input("Play cookie: ")
+        game_server = args.game_server or input("Game server: ")
+    gttrl = Gttrl(
+        username,
+        password,
+        args.game_path or config_file["game_path"],
+        args.enable_log or config_file["enable_log"],
+    )
     if username:
         print("Logging in...")
         play_cookie, game_server = gttrl.get_play_cookie()
+        if args.print_play_cookie:
+            print(f"{play_cookie}\n{game_server}")
+            return
     else:
         pass
-    if print_play_cookie:
-        print(play_cookie, game_server)
-        return
-    if not skip_update:
+    if not (args.skip_update or config_file["skip_update"]):
         print("Downloading game files...")
         gttrl.download_game_files()
     print("Launching game...")
