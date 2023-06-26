@@ -4,7 +4,7 @@ from pathlib import Path
 
 from .gttrl import Config, Gttrl
 
-__version__ = "1.1"
+__version__ = "1.2"
 
 
 def main():
