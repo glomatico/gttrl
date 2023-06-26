@@ -131,19 +131,12 @@ class Gttrl:
 
     def get_play_cookie(self):
         login_response = self.login_request()
-        if (
-            login_response["success"] == "partial"
-            and login_response["banner"]
-            == "Please check your email for a ToonGuard code and enter it below."
-        ):
-            while login_response["success"] == "partial":
-                toon_guard_input = input(
-                    "Enter your Toon Guard code received in your account email: "
-                )
-                login_response = self.login_request(
-                    toon_guard_input=toon_guard_input,
-                    toon_guard_token=login_response["responseToken"],
-                )
+        while login_response["success"] == "partial":
+            toon_guard_input = input(f'{login_response["banner"]}: ')
+            login_response = self.login_request(
+                toon_guard_input=toon_guard_input,
+                toon_guard_token=login_response["responseToken"],
+            )
         while login_response["success"] == "delayed":
             login_response = self.login_request(
                 queue_token=login_response["queueToken"]
