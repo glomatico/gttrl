@@ -99,24 +99,28 @@ def get_accounts_file(accounts_file_path: Path) -> dict:
 )
 @click.option(
     "--config-file-path",
+    "-c",
     type=Path,
     help="Path to a .json file containing the launcher configuration.",
     default=DEFAULT_CONFIG_FILE_PATH,
 )
 @click.option(
     "--game-dir-path",
+    "-g",
     type=Path,
     help="Path to Toontown Rewritten game directory.",
     default=DEFAULT_GAME_DIR_PATH,
 )
 @click.option(
     "--no-config-file",
+    "-n",
     is_flag=True,
     help="Don't read from config file and don't write the default config file.",
     callback=no_config_callback,
 )
 @click.option(
     "--display-game-log",
+    "-d",
     is_flag=True,
     help="Display the game log in the terminal.",
 )
@@ -132,7 +136,7 @@ def get_accounts_file(accounts_file_path: Path) -> dict:
     help="Print the play cookie and game server and exit.",
 )
 @click.help_option("-h", "--help")
-@click.version_option(__version__)
+@click.version_option(__version__, "-v", "--version")
 def main(
     login_mode: str,
     username: str,
