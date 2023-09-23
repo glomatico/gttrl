@@ -43,7 +43,7 @@ gttrl can be configured using the command line arguments or the config file. The
 | `-u`, `--username` / - | Account username. | `null` |
 | `-p`, `--password` / - | Account password. | `null` |
 | `-a`, `--account-name` / `account_name` | Account name provided in accounts file. | `null` |
-| `--accounts-file-path` / `accounts_file_path` | Path to a .ini file containing Toontown Rewritten account credentials | `<home folder>/.gttrl/accounts.ini` |
+| `--accounts-file-path` / `accounts_file_path` | Path to a .ini file containing account credentials | `<home folder>/.gttrl/accounts.ini` |
 | `--play-cookie` / - | Play cookie. | `null` |
 | `--game-server` / - | Game server. | `null` |
 | `--config-file-path` / - | Path to a .json file containing the launcher configuration. | `<home folder>/.gttrl/config.json` |
