@@ -5,6 +5,7 @@ from pathlib import Path
 
 import click
 
+from . import __version__
 from .constants import *
 from .launcher import Launcher
 
@@ -129,6 +130,8 @@ def get_accounts_file(accounts_file_path: Path) -> dict:
     is_flag=True,
     help="Print the play cookie and game server and exit.",
 )
+@click.help_option("-h", "--help")
+@click.version_option(__version__)
 def main(
     login_mode: str,
     username: str,
