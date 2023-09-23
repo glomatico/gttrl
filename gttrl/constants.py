@@ -31,5 +31,5 @@ DEFAULT_CONFIG_FILE_PATH = DEFAULT_GTTRL_DIR_PATH / "config.json"
 DEFAULT_ACCOUNTS_FILE_PATH = DEFAULT_GTTRL_DIR_PATH / "accounts.ini"
 
 DEFAULT_ACCOUNTS_FILE_CONTENT = (
-    "[myaccount]\nusername=myusername\npassword=mypassword\ndefault=false\n"
+    "[myaccount]\nusername=myusername\npassword=mypassword\n"
 )
