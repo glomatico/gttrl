@@ -6,7 +6,7 @@ EXCLUDED_CONFIG_FILE_PARAMS = (
     "play_cookie",
     "game_server",
     "config_file_path",
-    "no_config_file"
+    "no_config_file",
     "version",
     "help",
 )
