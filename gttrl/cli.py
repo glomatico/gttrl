@@ -61,24 +61,25 @@ def get_accounts_file(accounts_file_path: Path) -> dict:
     "--login-mode",
     type=click.Choice(["credentials", "accountsfile", "playcookieandserver"]),
     default="credentials",
+    help="Login mode to use.",
 )
 @click.option(
     "--username",
     "-u",
     type=str,
-    help="Toontown Rewritten account username.",
+    help="Account username.",
 )
 @click.option(
     "--password",
     "-p",
     type=str,
-    help="Toontown Rewritten account password.",
+    help="Account password.",
 )
 @click.option(
     "--account-name",
     "-a",
     type=str,
-    help="Toontown Rewritten account name provided in accounts file.",
+    help="Account name provided in accounts file.",
 )
 @click.option(
     "--accounts-file-path",
@@ -89,12 +90,12 @@ def get_accounts_file(accounts_file_path: Path) -> dict:
 @click.option(
     "--play-cookie",
     type=str,
-    help="Toontown Rewritten play cookie.",
+    help="Play cookie.",
 )
 @click.option(
     "--game-server",
     type=str,
-    help="Toontown Rewritten game server.",
+    help="Game server.",
 )
 @click.option(
     "--config-file-path",
