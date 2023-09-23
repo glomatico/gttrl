@@ -69,4 +69,4 @@ If you don't provide the necessary values for a login mode, either through the c
   ...
   ```
 
-- **`playcookie`**: Manually enter a play cookie and game server. You can get your play cookie and game server by enabling the `print_play_cookie_and_server` option with one of the other login modes. In theory, you can share your play cookie with other people to let them play on your account without giving them your username and password.
+- **`playcookie`**: Manually enter a play cookie and game server. You can get your play cookie and game server by enabling the `print_play_cookie_and_server` option with one of the other login modes. In theory, you can share your play cookie and game server with other people to let them play on your account without giving them your username and password.
