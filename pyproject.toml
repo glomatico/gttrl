@@ -2,11 +2,8 @@
 name = "gttrl"
 description = "Glomatico's Toontown Rewritten Launcher"
 requires-python = ">=3.7"
-authors = [{name = "glomatico"}]
-dependencies = [
-    "requests",
-    "tqdm",
-]
+authors = [{ name = "glomatico" }]
+dependencies = ["click", "requests", "tqdm"]
 readme = "README.md"
 dynamic = ["version"]
 
