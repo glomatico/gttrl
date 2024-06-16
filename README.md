@@ -41,7 +41,7 @@ Config file values can be overridden using command line arguments.
 | `--config-path` / -                                                         | Path to the config file.                    | `<home>/.gttrl/config.json` |
 | `--game-dir-path` / `game_dir_path`                                         | Path to the game directory.                 | `<home>/.gttrl/game`        |
 | `--display-game-log` / `display_game_log`                                   | Display game log on terminal.               | `false`                     |
-| `--no-config-file`, `-n` / -                                                | Don't load the config file                  | `false`                     |
+| `--no-config-file`, `-n` / -                                                | Don't load the config file.                 | `false`                     |
 
 ### Login modes
 The following login modes are available:
