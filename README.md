@@ -47,5 +47,5 @@ Config file values can be overridden using command line arguments.
 The following login modes are available:
 * `credentials`
   * Manually enter your account credentials or read from the command line arguments.
-* `playcookie`
+* `playcookieandgameserver`
   * Manually enter a play cookie and game server or read from the command line arguments. You grab a play cookie and game server by enabling the `print_play_cookie_and_server` option using `credentials` login mode. This is useful when you want to allow someone else to play without sharing your account credentials.
