@@ -20,7 +20,7 @@ A cross-platform CLI launcher for Toontown Rewritten.
 ```bash
 gttrl [OPTIONS]
 ```
-gttrl will prompt the username and password if they are not provided through the command line arguments.
+gttrl will prompt the username and password if they are not provided through the command line arguments. After logging in, it will check for game updates and download them if necessary. Finally, it will launch the game.
 
 ## Configuration
 gttrl can be configured by using the command line arguments or the config file.
