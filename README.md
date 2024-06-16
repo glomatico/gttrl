@@ -37,7 +37,7 @@ Config file values can be overridden using command line arguments.
 | `--game-server` / -                                                         | Game server.                                | `null`                      |
 | `--login-mode` / `login_mode`                                               | Login mode.                                 | `credentials`               |
 | `--print-play-cookie-and-game-server` / `print_play_cookie_and_game_server` | Print play cookie and game server and exit. | `false`                     |
-| `--skip-update` / `skip_update`                                             | Skip update                                 | `false`                     |
+| `--skip-update` / `skip_update`                                             | Skip checking for game updates.             | `false`                     |
 | `--config-path` / -                                                         | Path to the config file.                    | `<home>/.gttrl/config.json` |
 | `--game-dir-path` / `game_dir_path`                                         | Path to the game directory.                 | `<home>/.gttrl/game`        |
 | `--display-game-log` / `display_game_log`                                   | Display game log on terminal.               | `false`                     |

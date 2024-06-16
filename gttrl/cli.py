@@ -96,7 +96,7 @@ def load_config_file(
 )
 @click.option(
     "--skip-update",
-    help="Skip update",
+    help="Skip checking for game updates.",
     is_flag=True,
 )
 @click.option(
