@@ -1,110 +1,128 @@
+from __future__ import annotations
+
 import bz2
 import hashlib
 import os
 import platform
 import subprocess
 import sys
+import time
 from pathlib import Path
 
+import click
 import tqdm
 from requests import Session
 
-from .constants import API_URL_GAME_FILES, API_URL_LOGIN, API_URL_PATCH_MANIFEST
+from .models import LoginResponse
 
 
 class Launcher:
+    LOGIN_API_URL = "https://www.toontownrewritten.com/api/login"
+    GAME_FILES_API_URL = "https://download.toontownrewritten.com/patches"
+    PATCH_MANIFEST_API_URL = (
+        "https://cdn.toontownrewritten.com/content/patchmanifest.txt"
+    )
+
     def __init__(
         self,
         game_dir_path: Path,
         display_game_log: bool,
-        **kwargs,
     ):
         self.game_dir_path = game_dir_path
         self.display_game_log = display_game_log
+        self._setup_game_exe()
+        self._setup_session()
 
-    def setup_game_exe(self) -> None:
-        self.os = sys.platform
-        if self.os == "win32" and platform.architecture()[0] == "64bit":
-            self.game_exe = "./TTREngine64.exe"
-            self.os = "win64"
-        elif self.os == "win32":
-            self.game_exe = "./TTREngine.exe"
-        elif self.os == "darwin":
-            self.game_exe = "./Toontown Rewritten"
-        elif self.os == "linux" or self.os == "linux2":
-            self.game_exe = "./TTREngine"
+    def _setup_game_exe(self):
+        self.host_os = sys.platform
+        if self.host_os == "win32" and platform.architecture()[0] == "64bit":
+            self.game_exe_path = "./TTREngine64.exe"
+            self.host_os = "win64"
+        elif self.host_os == "win32":
+            self.game_exe_path = "./TTREngine.exe"
+        elif self.host_os == "darwin":
+            self.game_exe_path = "./Toontown Rewritten"
+        elif self.host_os in ("linux", "linux2"):
+            self.game_exe_path = "./TTREngine"
         else:
-            self.game_exe = None
+            raise Exception("Unsupported OS")
 
-    def setup_session(self) -> None:
+    def _setup_session(self):
         self.session = Session()
 
-    def download_game_file(self, filename_server: str, game_file_path: Path) -> None:
-        game_file_response = self.session.get(
-            f"{API_URL_GAME_FILES}/{filename_server}",
-            stream=True,
-        )
+    def download_file(self, url: str, output_path: Path):
+        response = self.session.get(url, stream=True)
+        response.raise_for_status()
         chunk_size = 1024
-        game_file_temp_path = game_file_path.parent / filename_server
-        with open(game_file_temp_path, "wb") as file, tqdm.tqdm(
-            total=int(game_file_response.headers.get("content-length", 0)),
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with tqdm.tqdm(
+            total=int(response.headers.get("content-length", 0)),
             unit="B",
             unit_scale=True,
             unit_divisor=chunk_size,
             leave=False,
-        ) as bar:
-            for chunk in game_file_response.iter_content(chunk_size):
+        ) as bar, output_path.open("wb") as file:
+            for chunk in response.iter_content(chunk_size):
                 if chunk:
                     file.write(chunk)
                     bar.update(len(chunk))
-        with open(game_file_temp_path, "rb") as file:
-            game_file_temp_content = file.read()
-        with open(game_file_path, "wb") as file:
-            file.write(bz2.decompress(game_file_temp_content))
-        os.remove(game_file_temp_path)
 
-    def get_file_sha1(self, file_location: Path) -> str:
+    def decompress_bz2_file(self, input_path: Path, output_path: Path):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(bz2.decompress(input_path.read_bytes()))
+
+    def download_game_file(
+        self,
+        server_filename: str,
+        output_path_bz2: Path,
+        output_path: Path,
+    ):
+        download_url = f"{self.GAME_FILES_API_URL}/{server_filename}"
+        self.download_file(download_url, output_path_bz2)
+        self.decompress_bz2_file(output_path_bz2, output_path)
+        os.remove(output_path_bz2)
+
+    def get_file_sha1(self, file_path: Path) -> str:
         hasher = hashlib.sha1()
-        with open(file_location, "rb") as f:
-            while True:
-                chunk = f.read(4096)
-                if not chunk:
-                    break
-                hasher.update(chunk)
+        hasher.update(file_path.read_bytes())
         return hasher.hexdigest()
 
-    def download_game_files(self) -> None:
+    def download_game_files(self):
         if not self.game_dir_path.exists():
             self.game_dir_path.mkdir(parents=True, exist_ok=True)
-        manifest = self.session.get(API_URL_PATCH_MANIFEST).json()
-        keys = list(manifest.keys())
-        for key in keys:
-            if self.os not in manifest[key]["only"]:
-                del manifest[key]
-        progress_bar = tqdm.tqdm(
-            manifest.keys(),
+        manifest = self.session.get(self.PATCH_MANIFEST_API_URL).json()
+        game_file_names = [
+            key for key in manifest.keys() if self.host_os in manifest[key]["only"]
+        ]
+        with tqdm.tqdm(
+            total=len(game_file_names),
             leave=False,
-        )
-        for file in manifest.keys():
-            progress_bar.set_description(file)
-            filename_server = manifest[file]["dl"]
-            game_file_path = self.game_dir_path / file
-            if not game_file_path.exists():
-                self.download_game_file(filename_server, game_file_path)
-            else:
-                file_sha1 = self.get_file_sha1(game_file_path)
-                if file_sha1 != manifest[file]["hash"]:
-                    self.download_game_file(filename_server, game_file_path)
-            progress_bar.update()
-        progress_bar.close()
+        ) as bar:
+            for game_file_name in game_file_names:
+                bar.set_description(game_file_name)
+                server_file_name = manifest[game_file_name]["dl"]
+                game_file_path = self.game_dir_path / game_file_name
+                server_file_path = self.game_dir_path / server_file_name
+                file_sha1 = (
+                    self.get_file_sha1(game_file_path)
+                    if game_file_path.exists()
+                    else None
+                )
+                if not file_sha1 or file_sha1 != manifest[game_file_name]["hash"]:
+                    self.download_game_file(
+                        server_file_name,
+                        server_file_path,
+                        game_file_path,
+                    )
+                bar.update()
 
     def get_login_response_username_and_password(
         self,
         username: str,
         password: str,
     ) -> dict:
-        login_response = self.session.post(
-            API_URL_LOGIN,
+        response = self.session.post(
+            self.LOGIN_API_URL,
             params={
                 "format": "json",
             },
@@ -113,53 +131,80 @@ class Launcher:
                 "password": password,
             },
         )
-        login_response.raise_for_status()
-        login_response = login_response.json()
-        return login_response
+        response.raise_for_status()
+        response = response.json()
+        return response
 
-    def get_login_response_toonguard(
-        self, toonguard_input: str, toonguard_token: str
+    def get_login_response_twofactor(
+        self,
+        app_token: str,
+        auth_token: str,
     ) -> dict:
-        login_response = self.session.post(
-            API_URL_LOGIN,
+        response = self.session.post(
+            self.LOGIN_API_URL,
             params={
                 "format": "json",
-                "appToken": toonguard_token,
-                "authToken": toonguard_input,
+            },
+            data={
+                "appToken": app_token,
+                "authToken": auth_token,
             },
         )
-        login_response.raise_for_status()
-        login_response = login_response.json()
-        return login_response
+        response.raise_for_status()
+        response = response.json()
+        return response
 
     def get_login_response_queue_token(self, queue_token: str) -> dict:
-        login_response = self.session.post(
-            API_URL_LOGIN,
+        response = self.session.post(
+            self.LOGIN_API_URL,
             params={
                 "format": "json",
                 "queueToken": queue_token,
             },
         )
-        login_response.raise_for_status()
-        login_response = login_response.json()
-        return login_response
+        response.raise_for_status()
+        response = response.json()
+        return response
 
-    def launch_game(self, play_cookie: str, game_server: str) -> None:
+    def get_login_response(self, username: str, password: str) -> LoginResponse:
+        login_response = self.get_login_response_username_and_password(
+            username,
+            password,
+        )
+        if login_response["success"] == "partial":
+            twofactor_input = click.prompt(login_response["banner"])
+            login_response = self.get_login_response_twofactor(
+                twofactor_input,
+                login_response["responseToken"],
+            )
+        while login_response["success"] == "delayed":
+            time.sleep(3)
+            login_response = self.get_login_response_queue_token(
+                login_response["queueToken"]
+            )
+        if login_response["success"] == "false":
+            raise Exception(login_response["banner"])
+        return LoginResponse(
+            play_cookie=login_response["cookie"],
+            game_server=login_response["gameserver"],
+        )
+
+    def launch_game(self, play_cookie: str, game_server: str):
         os.environ["TTR_PLAYCOOKIE"] = play_cookie
         os.environ["TTR_GAMESERVER"] = game_server
         os.chdir(self.game_dir_path)
         if self.display_game_log:
-            subprocess.call([self.game_exe])
-        elif self.os == "win32" or self.os == "win64":
+            subprocess.call([self.game_exe_path])
+        elif self.host_os in ("win32", "win64"):
             subprocess.Popen(
-                [self.game_exe],
+                [self.game_exe_path],
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
-            if not os.access(self.game_exe, os.X_OK):
-                os.chmod(self.game_exe, 0o755)
+            if not os.access(self.game_exe_path, os.X_OK):
+                os.chmod(self.game_exe_path, 0o755)
             subprocess.Popen(
-                [self.game_exe],
+                [self.game_exe_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )

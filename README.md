@@ -1,72 +1,51 @@
 # Glomatico's Toontown Rewritten Launcher
-
-A cross-platform CLI launcher for Toontown Rewritten written in Python and installable via pip.
-
-## Table of contents
-- [Glomatico's Toontown Rewritten Launcher](#glomaticos-toontown-rewritten-launcher)
-  - [Table of contents](#table-of-contents)
-  - [Features](#features)
-  - [Installation](#installation)
-  - [Usage](#usage)
-  - [Configuration](#configuration)
-    - [Login modes](#login-modes)
+A cross-platform CLI launcher for Toontown Rewritten.
   
 ## Features
-- Cross-platform
-- Auto login with accounts stored in a file
-- Lightweight and fast
-- Easy to install and use
-- Highly configurable
+* Cross-platform
+* Lightweight and fast
+* Easy to install and use
+* Highly configurable
+  
+## Prerequisites
+* Python 3.8 or higher
   
 ## Installation
-1. Install Python 3.7 or higher
-  
-2. Install gttrl using pip:
-
+1. Install the package `gttrl` using pip
     ```bash
     pip install gttrl
     ```
 
 ## Usage
-To run the launcher, simply execute the following command:
-
 ```bash
-gttrl
+gttrl [OPTIONS]
 ```
+gttrl will prompt the username and password if they are not provided through the command line arguments.
 
 ## Configuration
-gttrl can be configured using the command line arguments or the config file. The config file is created automatically when you run gttrl for the first time at `~/.gttrl/config.json` on Linux and `%USERPROFILE%\.gttrl\config.json` on Windows. Config file values can be overridden using command line arguments.
+gttrl can be configured by using the command line arguments or the config file.
 
-| Command line argument / Config file key | Description | Default value |
-| --- | --- | --- |
-| `-l`, `--login-mode` / `login_mode` | Login mode to use. | `credentials` |
-| `-u`, `--username` / - | Account username. | `null` |
-| `-p`, `--password` / - | Account password. | `null` |
-| `-a`, `--account-name` / `account_name` | Account name provided in accounts file. | `null` |
-| `--accounts-file-path` / `accounts_file_path` | Path to a .ini file containing account credentials | `<home folder>/.gttrl/accounts.ini` |
-| `--play-cookie` / - | Play cookie. | `null` |
-| `--game-server` / - | Game server. | `null` |
-| `--config-file-path` / - | Path to a .json file containing the launcher configuration. | `<home folder>/.gttrl/config.json` |
-| `--game-dir-path` / `game_dir_path` | Path to Toontown Rewritten game directory. | `<home folder>/.gttrl/Toontown Rewritten` |
-| `--no-config-file` / - | Don't read from config file and don't write the default config file. | `false` |
-| `--display-game-log` / `display_game_log` | Display the game log in the terminal. | `false` |
-| `-s`, `--skip-update` / `skip_update` | Skip checking for game updates. | `false` |
-| `--print-play-cookie-and-server` / `print_play_cookie_and_server` | Print the play cookie and game server and exit. | `false` |
+The config file is created automatically when you run gamdl for the first time at `~/.gttrl/config.json` on Linux and `%USERPROFILE%\.gttrl\config.json` on Windows.
+
+Config file values can be overridden using command line arguments.
+
+| Command line argument / Config file key                                     | Description                                 | Default value               |
+| --------------------------------------------------------------------------- | ------------------------------------------- | --------------------------- |
+| `--username`, `-u` / -                                                      | Username.                                   | `null`                      |
+| `--password`, `-p` / -                                                      | Password.                                   | `null`                      |
+| `--play-cookie` / -                                                         | Play cookie.                                | `null`                      |
+| `--game-server` / -                                                         | Game server.                                | `null`                      |
+| `--login-mode` / `login_mode`                                               | Login mode.                                 | `credentials`               |
+| `--print-play-cookie-and-game-server` / `print_play_cookie_and_game_server` | Print play cookie and game server and exit. | `false`                     |
+| `--skip-update` / `skip_update`                                             | Skip update                                 | `false`                     |
+| `--config-path` / -                                                         | Path to the config file.                    | `<home>/.gttrl/config.json` |
+| `--game-dir-path` / `game_dir_path`                                         | Path to the game directory.                 | `<home>/.gttrl/game`        |
+| `--display-game-log` / `display_game_log`                                   | Display game log on terminal.               | `false`                     |
+| `--no-config-file`, `-n` / -                                                | Do not use a config file.                   | `false`                     |
 
 ### Login modes
-
-If you don't provide the necessary values for a login mode, either through the command line or the config file, you will be prompted to enter them.
-
-- **`credentials`**: Manually enter your account credentials. This is the default login mode.
-  
-- **`accountsfile`**: Select an account from an accounts file. The accounts file must be in the following format:
-  ```ini
-  [account1]
-  username=myusername
-  password=mypassword
-
-  [account2]
-  ...
-  ```
-
-- **`playcookie`**: Manually enter a play cookie and game server. You can get your play cookie and game server by enabling the `print_play_cookie_and_server` option with one of the other login modes. In theory, you can share your play cookie and game server with other people to let them play on your account without giving them your username and password.
+The following login modes are available:
+* `credentials`
+  * Manually enter your account credentials or read from the command line arguments.
+* `playcookie`
+  * Manually enter a play cookie and game server or read from the command line arguments. You grab a play cookie and game server by enabling the `print_play_cookie_and_server` option using `credentials` login mode. This is useful when you want to allow someone else to play without sharing your account credentials.
