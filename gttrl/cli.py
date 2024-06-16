@@ -123,7 +123,7 @@ def load_config_file(
     "-n",
     is_flag=True,
     callback=load_config_file,
-    help="Do not use a config file.",
+    help="Don't load the config file.",
 )
 def main(
     username: str,
