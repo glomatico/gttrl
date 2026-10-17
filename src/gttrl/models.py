@@ -5,3 +5,4 @@ from dataclasses import dataclass
 class LoginResponse:
     play_cookie: str
     game_server: str
+    manifest: str | None = None
