@@ -129,10 +129,18 @@ def main() -> None:
 @click.option("--game-server", help="Game server for a supplied play cookie.")
 @click.option("--login-mode", type=click.Choice(["credentials", "playcookieandgameserver"]), hidden=True)
 @click.option("--print-play-cookie-and-game-server", is_flag=True, help="Print sensitive launch credentials and exit.")
-@click.option("--skip-update", is_flag=True, default=None, help="Skip patch verification and download.")
+@click.option(
+    "--skip-update/--check-update",
+    default=None,
+    help="Skip patch verification or explicitly check for updates.",
+)
 @click.option("--config-path", type=click.Path(path_type=Path), default=None)
 @click.option("--game-dir-path", type=click.Path(path_type=Path), default=None)
-@click.option("--display-game-log", is_flag=True, default=None)
+@click.option(
+    "--display-game-log/--hide-game-log",
+    default=None,
+    help="Display or hide the game process output.",
+)
 @click.option("--concurrent-downloads", type=click.IntRange(1, 16), default=None)
 @click.option("-n", "--no-config-file", is_flag=True, help="Ignore config and do not persist settings.")
 def play(

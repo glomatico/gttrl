@@ -80,14 +80,12 @@ def sha1_file(path: Path) -> str:
 
 def _unpack_and_verify(compressed: Path, output: Path, expected_hash: str) -> None:
     digest = hashlib.sha1()
-    decompressor = bz2.BZ2Decompressor()
-    with compressed.open("rb") as source, output.open("wb") as dest:
+    # BZ2File bounds uncompressed memory use; a single bz2.decompress(chunk)
+    # can expand into a very large buffer.
+    with bz2.open(compressed, "rb") as source, output.open("wb") as dest:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            data = decompressor.decompress(chunk)
-            dest.write(data)
-            digest.update(data)
-        if not decompressor.eof:
-            raise ValueError("Compressed download was truncated")
+            dest.write(chunk)
+            digest.update(chunk)
     if digest.hexdigest().lower() != expected_hash.lower():
         raise ValueError("Downloaded file SHA-1 does not match the patch manifest")
 
@@ -112,7 +110,12 @@ class Updater:
             for name, info in payload.items():
                 if not isinstance(info, dict):
                     raise click.ClickException(f"Invalid manifest entry: {name}")
-                if self.host_os not in info.get("only", []):
+                targets = info.get("only")
+                if not isinstance(targets, list) or not all(
+                    isinstance(target, str) for target in targets
+                ):
+                    raise click.ClickException(f"Invalid OS targets for {name}")
+                if self.host_os not in targets:
                     continue
                 path = _safe_destination(self.game_dir, name)
                 remote = str(_safe_relative_path(info.get("dl")))
