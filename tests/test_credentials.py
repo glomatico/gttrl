@@ -16,14 +16,14 @@ def test_saved_accounts_and_auto_login(tmp_path, monkeypatch):
     accounts.add("toon2", "secret2", auto_login=False)
     assert accounts.usernames == ["toon1", "toon2"]
     assert config.get("default_account") == "toon1"
-    assert config.get("auto_login") is True
+    assert config.get("accounts")[0]["auto_login"] is True
     assert accounts.auto_login_accounts == ["toon1"]
     assert accounts.get("toon1") == "secret1"
     assert "secret1" not in config.path.read_text()
     accounts.remove("toon1")
     assert accounts.usernames == ["toon2"]
     assert config.get("default_account") == "toon2"
-    assert config.get("auto_login") is False
+    assert config.get("accounts")[0]["auto_login"] is False
     assert passwords == {"toon2": "secret2"}
 
 
@@ -45,7 +45,7 @@ def test_select_multiple_accounts_and_preserve_choices(tmp_path, monkeypatch):
     assert accounts.auto_login_accounts == ["alice", "bob"]
     accounts.remove("alice")
     assert accounts.auto_login_accounts == ["bob"]
-    with pytest.raises(CredentialError, match="Unknown saved account"):
+    with pytest.raises(CredentialError, match="No saved account"):
         accounts.set_auto_login(["nonexistent"])
     assert accounts.auto_login_accounts == ["bob"]
 

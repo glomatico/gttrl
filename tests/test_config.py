@@ -4,14 +4,14 @@ import os
 import pytest
 from click import ClickException
 
-from gttrl.config import Config
+from gttrl.config import Config, _account
 
 
 def test_new_config_and_permissions(tmp_path):
     path = tmp_path / "config.json"
     config = Config(path)
     assert config.get("concurrent_downloads") == 3
-    assert config.get("auto_login") is False
+    assert config.get("accounts") == []
     assert json.loads(path.read_text())["save_prompt"] == "ask"
     config.set("save_prompt", "never")
     assert Config(path).get("save_prompt") == "never"
@@ -36,10 +36,17 @@ def test_migrates_legacy_single_auto_login_without_writing_on_read(tmp_path):
     }
     path.write_text(json.dumps(legacy))
     config = Config(path)
-    assert config.get("auto_login_accounts") == ["alice"]
+    assert config.get("accounts") == [
+        _account("alice", auto_login=True, save_password="yes"),
+        _account("bob", save_password="yes"),
+    ]
     assert json.loads(path.read_text()) == legacy
     config.set("skip_update", False)
-    assert Config(path).get("auto_login_accounts") == ["alice"]
+    assert Config(path).get("accounts") == [
+        _account("alice", auto_login=True, save_password="yes"),
+        _account("bob", save_password="yes"),
+    ]
+    assert "auto_login_accounts" not in json.loads(path.read_text())
 
 
 def test_new_auto_login_config_does_not_reenable_legacy_default(tmp_path):
@@ -48,8 +55,9 @@ def test_new_auto_login_config_does_not_reenable_legacy_default(tmp_path):
         "accounts": ["alice"], "auto_login": True,
         "default_account": "alice", "auto_login_accounts": [],
     }))
-    assert Config(path).get("auto_login_accounts") == []
-    assert Config(path).get("auto_login") is False
+    assert Config(path).get("accounts") == [
+        _account("alice", auto_login=False, save_password="yes")
+    ]
 
 
 @pytest.mark.parametrize("contents", ["not json", "[]", '{"concurrent_downloads": 0}'])
@@ -65,4 +73,26 @@ def test_no_config_file_does_not_write(tmp_path):
     config = Config(path, disabled=True)
     assert not path.exists()
     with pytest.raises(ClickException):
-        config.set("auto_login", True)
+        config.set("accounts", [_account("alice")])
+
+
+def test_new_accounts_schema_and_validation(tmp_path):
+    path = tmp_path / "config.json"
+    config = Config(path)
+    config.set("accounts", [
+        _account("long-email@example.com", nickname="My Toon", auto_login=True, save_password="never"),
+        _account("secondary", save_password="ask"),
+    ])
+    assert Config(path).get("accounts")[0]["nickname"] == "My Toon"
+    contents = path.read_text()
+    assert '"auto_login_accounts"' not in contents
+    assert '"auto_login": true' in contents
+    for invalid in [
+        [{"username": "abc", "password": "secret"}],
+        [_account("abc", save_password="ask"), _account("abc", save_password="yes")],
+        [_account("abc", nickname="secondary"), _account("secondary")],
+        [{**_account("abc"), "save_password": "other"}],
+        [{**_account("abc"), "auto_login": "yes"}],
+    ]:
+        with pytest.raises(ClickException):
+            config.set("accounts", invalid)
