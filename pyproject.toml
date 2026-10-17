@@ -5,6 +5,8 @@ description = "A cross-platform CLI launcher for Toontown Rewritten."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "glomatico" }]
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["toontown", "toontown-rewritten", "launcher", "cli", "gaming"]
 classifiers = [
     "Environment :: Console",

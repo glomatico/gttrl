@@ -155,6 +155,10 @@ If you're upgrading from **GTTRL 1.4**, your game-directory, update, and game-lo
 
 See the [GitHub project](https://github.com/glomatico/gttrl) for issues, suggestions, and source code.
 
+## License
+
+GTTRL is available under the [MIT License](LICENSE).
+
 ## For developers
 
 ```sh
