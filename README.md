@@ -7,6 +7,20 @@ and download progress use Rich. Machine-readable output remains plain text.
 
 > GTTRL is an unofficial community project and is not affiliated with the Toontown Rewritten team.
 
+## Features
+
+- **Multi-toon / multi-login:** select several remembered accounts and start a separate
+  Toontown Rewritten instance for each with a single `gttrl` command.
+- **Secure account management:** passwords are stored in your system's credential
+  manager, with optional automatic login and recovery when a saved login is rejected.
+- **Multiple authentication methods:** username/password, saved accounts, or a
+  manually supplied play cookie and game server, including ToonGuard/2FA support.
+- **Fast, safe updates:** verify files, download up to three at a time, and
+  atomically replace them only after checking their integrity.
+- **Modern interactive CLI:** Questionary menus, Rich messages and progress
+  bars, configurable settings, and scripting-friendly output.
+- **Cross-platform:** runs on Linux, Windows and macOS with Python 3.11+.
+
 ## Requirements
 
 - Python 3.11 or newer
@@ -40,7 +54,7 @@ gttrl play --no-saved-login
 
 With no account remembered, GTTRL prompts for your username and password. After successful authentication, it offers to:
 
-1. **Save and enable automatic login:** remember your account securely and select it automatically next time.
+1. **Save and enable automatic login:** remember your account securely and add it to the accounts started automatically.
 2. **Save but ask each time:** remember the account securely, but display an account picker when you run `gttrl`.
 3. **Don't save:** use your credentials for this launch only.
 4. **Never ask again:** don't save and suppress future save prompts.
@@ -67,6 +81,42 @@ gttrl accounts clear
 ```
 
 `accounts add` validates the account by authenticating with the TTR login API before storing anything. Passwords are stored in the operating system's credential store via [keyring](https://pypi.org/project/keyring/); only account names and non-sensitive preferences are written to the JSON config. If no secure credential store is available, GTTRL **does not fall back to saving an unprotected password**.
+
+### Multi-toon / multi-login
+
+To automatically start multiple game instances, select which saved accounts
+should log in when running `gttrl`:
+
+```sh
+gttrl accounts add                        # Add your additional TTR accounts
+gttrl accounts add --exclusive-auto-login # Save and auto-launch only this account
+gttrl accounts add --auto-login           # Add a saved account to auto-launch
+gttrl accounts add --no-auto-login        # Save without changing auto-launch
+gttrl accounts auto-login                 # Interactive multi-select menu
+gttrl accounts auto-login set alice bob   # Non-interactive selection
+gttrl accounts auto-login list            # Show selected usernames
+gttrl accounts auto-login off             # Disable automatic login
+gttrl accounts auto-login on              # Enable for your default account if none selected
+gttrl                                     # Start one game instance per selected account
+```
+
+An existing 2.0 single-account auto-login configuration migrates automatically.
+Adding other accounts does not disable or replace existing auto-login selections.
+When adding another account interactively, GTTRL offers **Exclusive auto-login**
+(replace the selected accounts with the new account), **Add to auto-login**
+(launch it alongside those already selected), and **Just add** (keep the
+existing selection unchanged). When saving a newly logged-in account, these
+same options appear alongside **Don't save** and **Never ask again**.
+Use `gttrl play --account alice` to explicitly launch **one** account even
+when multi-login is enabled. `gttrl play --choose-account` forces the single-account
+picker. Each selected account gets its own authenticated session and game
+process; the shared game installation is checked and updated **only once**.
+When `--display-game-log` is enabled, output from multiple processes may interleave.
+
+If a saved login is rejected by TTR, interactive sessions offer to re-enter the
+password, skip that account, or cancel. Once reauthentication succeeds, you
+can replace its stored password. Network failures are not treated as invalid
+passwords.
 
 ### Manual, external, and scripted login
 
@@ -147,3 +197,4 @@ Publishing to PyPI uses GitHub Actions and OIDC trusted publishing. Configure th
 - **No interactive terminal:** Supply `--username` and `--password-stdin`, use `--account` with an accessible keyring, or provide both `--play-cookie` and `--game-server`.
 - **Corrupted configuration:** Correct or move the JSON file at `~/.gttrl/config.json`. Credentials are kept separately in the OS keyring.
 - **No game executable:** Ensure the game download completes successfully and `game_dir_path` points to the correct directory.
+- **Game closes immediately:** Use `gttrl play --display-game-log` to inspect missing libraries or crash messages; multi-login uses separate processes with their own session credentials.

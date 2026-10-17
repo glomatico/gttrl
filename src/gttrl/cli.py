@@ -6,6 +6,7 @@ import asyncio
 import json
 import platform
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -13,10 +14,11 @@ import httpx
 import questionary
 
 from . import __version__, ui
-from .auth import AuthClient
+from .auth import AuthClient, LoginRejected
 from .config import DEFAULTS, Config
 from .credentials import Accounts, CredentialError
 from .launcher import Launcher
+from .models import LoginResponse
 from .updater import Updater
 
 
@@ -68,6 +70,26 @@ def _select(message: str, choices: list[tuple[str, str]]) -> str:
     return result
 
 
+def _select_auto_accounts(saved: Accounts) -> list[str]:
+    if not saved.usernames:
+        raise click.ClickException("Add a saved account before configuring automatic login")
+    if not _interactive():
+        raise click.ClickException(
+            "Interactive selection requires a terminal; use 'gttrl accounts auto-login set USERNAME ...'"
+        )
+    selected = set(saved.auto_login_accounts)
+    result = questionary.checkbox(
+        "Select accounts to launch automatically (space to toggle):",
+        choices=[
+            questionary.Choice(username, value=username, checked=username in selected)
+            for username in saved.usernames
+        ],
+    ).ask()
+    if result is None:
+        raise click.Abort()
+    return result
+
+
 def _session_value(value: str | None, label: str, *, secret: bool = False) -> str:
     """Use a supplied session value or ask for the missing one."""
     value = value or _prompt_text(label, password=secret)
@@ -76,25 +98,51 @@ def _session_value(value: str | None, label: str, *, secret: bool = False) -> st
     return value
 
 
+def _new_account_choices() -> list[tuple[str, str]]:
+    """Actions for storing another account when one is already remembered."""
+    return [
+        ("Exclusive auto-login (replace selected accounts)", "exclusive"),
+        ("Add to auto-login (launch alongside existing accounts)", "add"),
+        ("Just add (do not change auto-login)", "save"),
+    ]
+
+
+def _save_account(
+    accounts: Accounts, username: str, password: str, choice: str
+) -> None:
+    accounts.add(
+        username,
+        password,
+        auto_login=choice in {"auto", "exclusive", "add"},
+        exclusive_auto_login=choice == "exclusive",
+    )
+
+
 def _ask_save(config: Config, accounts: Accounts, username: str, password: str) -> None:
     if config.disabled or config.get("save_prompt") == "never" or not _interactive():
         return
     if username in accounts.usernames:
         return
-    choice = _select(
-        "Remember this account?",
-        [
+    save_options = (
+        _new_account_choices()
+        if accounts.usernames
+        else [
             ("Save and enable automatic login", "auto"),
             ("Save, but ask which account to use each time", "save"),
+        ]
+    )
+    choice = _select(
+        "Remember this account?",
+        save_options + [
             ("Don't save", "no"),
             ("Never ask to save again", "never"),
         ],
     )
     if choice == "never":
         config.set("save_prompt", "never")
-    elif choice in {"auto", "save"}:
+    elif choice in {"auto", "save", "exclusive", "add"}:
         try:
-            accounts.add(username, password, auto_login=choice == "auto")
+            _save_account(accounts, username, password, choice)
         except CredentialError as error:
             ui.error(f"Couldn't remember account: {error.format_message()}")
         else:
@@ -130,6 +178,84 @@ def _choose_credentials(
         if selection != "__new__":
             return selection, accounts.get(selection), True
     return _prompt_text("Username"), _prompt_text("Password", password=True), False
+
+
+def _selected_credentials(
+    accounts: Accounts,
+    config: Config,
+    account: str | None,
+    username: str | None,
+    password: str | None,
+    choose_account: bool,
+    no_saved_login: bool,
+) -> list[tuple[str, str, bool]]:
+    explicit = bool(account or username is not None or password is not None or
+                    choose_account or no_saved_login)
+    if not explicit and not config.disabled and accounts.auto_login_accounts:
+        return [
+            (user, accounts.get(user), True)
+            for user in accounts.auto_login_accounts
+        ]
+    return [
+        _choose_credentials(
+            accounts, config, account, username, password,
+            choose_account, no_saved_login,
+        )
+    ]
+
+
+def _authenticate(
+    auth: AuthClient,
+    accounts: Accounts,
+    config: Config,
+    username: str,
+    password: str,
+    was_saved: bool,
+):
+    """Allow a rejected saved password to be replaced after successful login."""
+    replacement = None
+    while True:
+        ui.info(f"Logging in as {username}...")
+        try:
+            response = auth.login(
+                username,
+                password,
+                prompt_token=lambda msg: _prompt_text(msg, password=True),
+                display=ui.info,
+            )
+        except LoginRejected as error:
+            if not was_saved or not _interactive():
+                raise
+            ui.warning(f"Login for {username} was rejected: {error.format_message()}")
+            action = _select(
+                "What would you like to do?",
+                [
+                    ("Re-enter password", "retry"),
+                    ("Skip this account", "skip"),
+                    ("Cancel launch", "cancel"),
+                ],
+            )
+            if action == "skip":
+                return None
+            if action == "cancel":
+                raise click.Abort() from error
+            password = _prompt_text("New password", password=True)
+            replacement = password
+        else:
+            ui.success(f"Successfully authenticated as {username}.")
+            if replacement is not None and _interactive() and _select(
+                "Update your saved password in the OS keyring?",
+                [("Yes", "yes"), ("No", "no")],
+            ) == "yes":
+                try:
+                    accounts.update_password(username, replacement)
+                except CredentialError as error:
+                    ui.error(f"Couldn't update the saved password: {error.format_message()}")
+                else:
+                    ui.success("Saved password updated securely.")
+            if not was_saved:
+                _ask_save(config, accounts, username, password)
+            return response
 
 
 @click.group(cls=DefaultPlayGroup, context_settings={"help_option_names": ["-h", "--help"]})
@@ -223,28 +349,41 @@ def play(
         config.get("display_game_log") if display_game_log is None else display_game_log,
     )
     manifest = None
+    sessions = []
     if not session_login:
         accounts = Accounts(config)
-        username, password, was_saved = _choose_credentials(
+        selections = _selected_credentials(
             accounts, config, account, username, password, choose_account, no_saved_login
         )
-        ui.info("Logging in...")
-        with AuthClient() as auth:
-            response = auth.login(
-                username,
-                password,
-                prompt_token=lambda msg: _prompt_text(msg, password=True),
-                display=ui.info,
+        if print_play_cookie_and_game_server and len(selections) > 1:
+            raise click.UsageError(
+                "Cannot print multiple session credentials. Use --account USERNAME to select one."
             )
-        ui.success("Login successful.")
-        play_cookie, game_server, manifest = (
-            response.play_cookie, response.game_server, response.manifest
-        )
-        if not was_saved:
-            _ask_save(config, accounts, username, password)
+        if len(selections) > 1:
+            ui.info(f"Multi-login: authenticating {len(selections)} accounts.")
+        with AuthClient() as auth:
+            for selected_user, selected_password, was_saved in selections:
+                response = _authenticate(
+                    auth, accounts, config, selected_user, selected_password, was_saved
+                )
+                if response is not None:
+                    sessions.append((selected_user, response))
+        if not sessions:
+            raise click.ClickException("No accounts were authenticated; nothing to launch")
     if print_play_cookie_and_game_server:
+        if not session_login:
+            play_cookie = sessions[0][1].play_cookie
+            game_server = sessions[0][1].game_server
         click.echo(f"Play cookie: {play_cookie}\nGame server: {game_server}")
         return
+    if session_login:
+        sessions = [("Session", LoginResponse(play_cookie, game_server))]
+    manifests = {response.manifest for _, response in sessions}
+    if len(manifests) > 1:
+        raise click.ClickException(
+            "Accounts received different patch manifests; refusing to share one game installation"
+        )
+    manifest = sessions[0][1].manifest
     if not (config.get("skip_update") if skip_update is None else skip_update):
         ui.info("Checking game files...")
         host_os = (
@@ -262,8 +401,36 @@ def play(
             raise click.ClickException(f"Game update failed: {error}") from error
         except httpx.HTTPError as error:
             raise click.ClickException(f"Game update network error: {error}") from error
-    ui.info("Launching Toontown Rewritten...")
-    launcher.launch_game(play_cookie, game_server)
+    processes = []
+    for selected_user, response in sessions:
+        ui.info(f"Launching Toontown Rewritten for {selected_user}...")
+        processes.append((selected_user, launcher.launch_game(
+            response.play_cookie, response.game_server
+        )))
+    if launcher.display_game_log:
+        failures = []
+        for selected_user, process in processes:
+            if process is not None and process.wait() != 0:
+                failures.append(selected_user)
+        if failures:
+            raise click.ClickException(
+                f"Game exited unsuccessfully for: {', '.join(failures)}"
+            )
+    else:
+        # Check for immediate startup failures once after launching all
+        # sessions. Running game clients remain detached.
+        time.sleep(0.25)
+        failed = [
+            f"{selected_user} (exit {process.poll()})"
+            for selected_user, process in processes
+            if process is not None and process.poll() is not None
+        ]
+        if failed:
+            raise click.ClickException(
+                "Game closed immediately for "
+                + ", ".join(failed)
+                + ". Try --display-game-log for diagnostics."
+            )
 
 
 @main.group()
@@ -282,25 +449,49 @@ def accounts_list(saved: Accounts) -> None:
         saved.usernames,
         default_account=saved.config.get("default_account"),
         auto_login=saved.config.get("auto_login"),
+        auto_login_accounts=saved.auto_login_accounts,
     )
 
 
 @accounts.command("add")
 @click.option("--username", help="Username to add.")
 @click.option("--auto-login/--no-auto-login", default=None, help="Use this account automatically.")
+@click.option(
+    "--exclusive-auto-login",
+    is_flag=True,
+    help="Use only this account for automatic login, replacing previous selections.",
+)
 @click.pass_obj
-def accounts_add(saved: Accounts, username: str | None, auto_login: bool | None) -> None:
+def accounts_add(
+    saved: Accounts,
+    username: str | None,
+    auto_login: bool | None,
+    exclusive_auto_login: bool,
+) -> None:
     """Authenticate and securely remember an account."""
+    if exclusive_auto_login and auto_login is not None:
+        raise click.UsageError(
+            "--exclusive-auto-login cannot be combined with --auto-login or --no-auto-login"
+        )
     username = username or _prompt_text("Username")
+    had_other_accounts = any(user != username for user in saved.usernames)
     password = _prompt_text("Password", password=True)
     with AuthClient() as auth:
         auth.login(username, password, prompt_token=lambda msg: _prompt_text(msg, password=True))
-    if auto_login is None:
-        if not _interactive():
-            auto_login = False
-        else:
-            auto_login = _select("Enable automatic login?", [("Yes", True), ("No, ask each time", False)])
-    saved.add(username, password, auto_login=auto_login)
+    if exclusive_auto_login:
+        choice = "exclusive"
+    elif auto_login is not None:
+        choice = "add" if auto_login else "save"
+    elif not _interactive():
+        choice = "save"
+    elif had_other_accounts:
+        choice = _select("How should this account be saved?", _new_account_choices())
+    else:
+        choice = _select(
+            "Enable automatic login?",
+            [("Yes", "auto"), ("No, ask each time", "save")],
+        )
+    _save_account(saved, username, password, choice)
     ui.success(f"Saved {username!r} securely.")
 
 
@@ -335,14 +526,45 @@ def accounts_default(saved: Accounts, username: str) -> None:
 
 
 @accounts.command("auto-login")
-@click.argument("state", type=click.Choice(["on", "off"]))
+@click.argument("action", required=False, type=click.Choice(
+    ["on", "off", "set", "list"], case_sensitive=False
+))
+@click.argument("usernames", nargs=-1)
 @click.pass_obj
-def accounts_auto_login(saved: Accounts, state: str) -> None:
-    """Enable or disable automatic login using the default account."""
-    if state == "on" and saved.config.get("default_account") not in saved.usernames:
-        raise click.ClickException("Choose a default saved account first")
-    saved.config.set("auto_login", state == "on")
-    ui.success(f"Auto-login: {state}")
+def accounts_auto_login(saved: Accounts, action: str | None, usernames: tuple[str, ...]) -> None:
+    """Select multiple accounts for automatic login and game launching.
+
+    Run without arguments for an interactive checkbox selector.
+    Or use: auto-login set USER1 USER2 ...
+    """
+    if action != "set" and usernames:
+        raise click.UsageError("Account names can only follow 'auto-login set'")
+    if action == "list":
+        if saved.auto_login_accounts:
+            for username in saved.auto_login_accounts:
+                click.echo(username)
+        else:
+            click.echo("No accounts selected for automatic login.")
+        return
+    if action == "set":
+        if not usernames:
+            raise click.UsageError("Specify at least one saved account or use 'auto-login off'")
+        selected = list(usernames)
+    elif action == "on":
+        selected = saved.auto_login_accounts
+        if not selected:
+            default = saved.config.get("default_account")
+            if default not in saved.usernames:
+                raise click.ClickException("Choose a default saved account first")
+            selected = [default]
+    elif action == "off":
+        selected = []
+    else:
+        selected = _select_auto_accounts(saved)
+    saved.set_auto_login(selected)
+    ui.success(
+        f"Automatic login configured for {len(selected)} account(s)."
+    )
 
 
 @main.group()
@@ -375,7 +597,7 @@ def config_get(settings: Config, key: str) -> None:
 @click.pass_obj
 def config_set(settings: Config, key: str, value: str) -> None:
     key = key.replace("-", "_")
-    if key in {"accounts", "default_account", "auto_login"}:
+    if key in {"accounts", "default_account", "auto_login", "auto_login_accounts"}:
         raise click.ClickException("Manage accounts through gttrl accounts instead")
     try:
         parsed = json.loads(value)

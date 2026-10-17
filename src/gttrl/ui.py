@@ -51,6 +51,7 @@ def accounts_list(
     *,
     default_account: str | None,
     auto_login: bool,
+    auto_login_accounts: Sequence[str] = (),
 ) -> None:
     """Show a table to players and a stable, plain listing to scripts."""
     terminal = console().is_terminal
@@ -63,12 +64,19 @@ def accounts_list(
         table = Table(title="Saved Accounts", header_style="bold cyan")
         table.add_column("Account")
         table.add_column("Default", justify="center")
+        table.add_column("Auto-login", justify="center")
         for username in usernames:
-            table.add_row(Text(username), "✓" if username == default_account else "")
+            table.add_row(
+                Text(username),
+                "✓" if username == default_account else "",
+                "✓" if username in auto_login_accounts else "",
+            )
         console().print(table)
     else:
         for username in usernames:
             label = " (default)" if username == default_account else ""
+            if username in auto_login_accounts:
+                label += " (auto-login)"
             click.echo(f"{username}{label}")
     summary = f"Auto-login: {'on' if auto_login else 'off'}"
     if terminal:

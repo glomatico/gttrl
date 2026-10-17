@@ -17,6 +17,10 @@ class LoginError(click.ClickException):
     pass
 
 
+class LoginRejected(LoginError):
+    """TTR explicitly rejected authentication (not a transport failure)."""
+
+
 class AuthClient:
     def __init__(self, client: httpx.Client | None = None):
         self.client = client or httpx.Client(timeout=20.0)
@@ -61,7 +65,7 @@ class AuthClient:
         while True:
             state = response["success"]
             if state == "false":
-                raise LoginError(str(response.get("banner") or "Login failed"))
+                raise LoginRejected(str(response.get("banner") or "Login rejected by TTR"))
             if state == "true":
                 cookie = response.get("cookie")
                 server = response.get("gameserver")
