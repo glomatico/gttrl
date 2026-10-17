@@ -49,15 +49,14 @@ def error(text: str) -> None:
 def accounts_list(
     usernames: Sequence[str],
     *,
-    default_account: str | None,
     auto_login: bool,
     auto_login_accounts: Sequence[str] = (),
-    nicknames: Mapping[str, str | None] | None = None,
+    aliases: Mapping[str, str | None] | None = None,
     password_policies: Mapping[str, str] | None = None,
 ) -> None:
     """Show a table to players and a stable, plain listing to scripts."""
     terminal = console().is_terminal
-    nicknames = nicknames or {}
+    aliases = aliases or {}
     password_policies = password_policies or {}
     if not usernames:
         if terminal:
@@ -67,24 +66,22 @@ def accounts_list(
     elif terminal:
         table = Table(title="Saved Accounts", header_style="bold cyan")
         table.add_column("Account")
-        table.add_column("Default", justify="center")
         table.add_column("Auto-login", justify="center")
         table.add_column("Password")
         for username in usernames:
-            nickname = nicknames.get(username)
-            title = f"{nickname} ({username})" if nickname else username
+            alias = aliases.get(username)
+            title = f"{alias} ({username})" if alias else username
             table.add_row(
                 Text(title),
-                "✓" if username == default_account else "",
                 "✓" if username in auto_login_accounts else "",
                 password_policies.get(username, ""),
             )
         console().print(table)
     else:
         for username in usernames:
-            nickname = nicknames.get(username)
-            display = f"{nickname} ({username})" if nickname else username
-            label = " (default)" if username == default_account else ""
+            alias = aliases.get(username)
+            display = f"{alias} ({username})" if alias else username
+            label = ""
             if username in auto_login_accounts:
                 label += " (auto-login)"
             click.echo(f"{display}{label}")

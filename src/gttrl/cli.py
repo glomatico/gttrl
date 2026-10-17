@@ -109,7 +109,7 @@ def _new_account_choices() -> list[tuple[str, str]]:
 
 def _save_account(
     accounts: Accounts, username: str, password: str, choice: str,
-    *, save_password: str = "yes", nickname: str | None = None,
+    *, save_password: str = "yes", alias: str | None = None,
 ) -> None:
     accounts.add(
         username,
@@ -117,7 +117,7 @@ def _save_account(
         auto_login=choice in {"auto", "exclusive", "add"},
         exclusive_auto_login=choice == "exclusive",
         save_password=save_password,
-        nickname=nickname,
+        alias=alias,
     )
 
 
@@ -130,7 +130,7 @@ def _password_policy_choice(message: str = "Remember the password?") -> str:
 
 
 def _ask_save(config: Config, accounts: Accounts, username: str, password: str) -> None:
-    if config.disabled or config.get("save_prompt") == "never" or not _interactive():
+    if config.disabled or not config.get("account_wizard") or not _interactive():
         return
     if username in accounts.usernames:
         return
@@ -146,19 +146,28 @@ def _ask_save(config: Config, accounts: Accounts, username: str, password: str) 
         "Remember this account?",
         save_options + [
             ("Don't save", "no"),
-            ("Never ask to save again", "never"),
+            ("Disable the account setup wizard", "never"),
         ],
     )
     if choice == "never":
-        config.set("save_prompt", "never")
+        config.set("account_wizard", False)
     elif choice in {"auto", "save", "exclusive", "add"}:
         try:
+            alias = _prompt_optional_alias()
             policy = _password_policy_choice()
-            _save_account(accounts, username, password, choice, save_password=policy)
+            _save_account(
+                accounts, username, password, choice,
+                save_password=policy, alias=alias,
+            )
         except CredentialError as error:
             ui.error(f"Couldn't remember account: {error.format_message()}")
         else:
             ui.success("Account securely saved to your OS keyring.")
+
+
+def _prompt_optional_alias() -> str | None:
+    alias = _prompt_text("Account alias (optional, no spaces)")
+    return alias or None
 
 
 def _choose_credentials(
@@ -198,7 +207,17 @@ def _selected_credentials(
     password: str | None,
     choose_account: bool,
     no_saved_login: bool,
+    chosen_accounts: tuple[str, ...] = (),
 ) -> list[tuple[str, str | None, bool]]:
+    if chosen_accounts:
+        if account or username is not None or password is not None or choose_account or no_saved_login:
+            raise click.UsageError(
+                "--accounts cannot be combined with --account, manual credentials, or --choose-account"
+            )
+        resolved = [accounts.resolve(name) for name in chosen_accounts]
+        if len(resolved) != len(set(resolved)):
+            raise click.UsageError("--accounts contains the same account more than once")
+        return [(name, None, True) for name in resolved]
     explicit = bool(account or username is not None or password is not None or
                     choose_account or no_saved_login)
     if not explicit and not config.disabled and accounts.auto_login_accounts:
@@ -206,6 +225,11 @@ def _selected_credentials(
             (user, None, True)
             for user in accounts.auto_login_accounts
         ]
+    if not config.get("account_wizard") and not accounts.usernames and not explicit:
+        raise click.UsageError(
+            "Account wizard is disabled: provide --username and --password "
+            "(or --password-stdin)"
+        )
     return [
         _choose_credentials(
             accounts, config, account, username, password,
@@ -296,7 +320,7 @@ def _authenticate(
                     ui.error(f"Couldn't update the password preference: {error.format_message()}")
                 else:
                     ui.success("Password preference updated.")
-            if not was_saved:
+            if not was_saved and config.get("account_wizard"):
                 _ask_save(config, accounts, username, password)
             return response
 
@@ -311,7 +335,12 @@ def main() -> None:
 @click.option("-u", "--username", help="Log in using this username.")
 @click.option("-p", "--password", help="Password (insecure in shell history; prefer prompting).")
 @click.option("--password-stdin", is_flag=True, help="Read the password from standard input.")
-@click.option("--account", help="Use a remembered account from the OS keyring.")
+@click.option("--account", help="Use a single saved account by username or alias.")
+@click.option(
+    "--accounts", "selected_accounts", multiple=True, metavar="NAME",
+    help="Launch listed saved accounts (aliases or usernames); commas or spaces accepted.",
+)
+@click.argument("additional_accounts", nargs=-1)
 @click.option("--choose-account", is_flag=True, help="Show the account picker.")
 @click.option("--no-saved-login", is_flag=True, help="Ignore remembered accounts for this launch.")
 @click.option("--play-cookie", help="Use an externally supplied play cookie.")
@@ -338,12 +367,18 @@ def main() -> None:
     help="Display or hide the game process output.",
 )
 @click.option("--concurrent-downloads", type=click.IntRange(1, 16), default=None)
+@click.option(
+    "--account-wizard/--no-account-wizard", default=None,
+    help="Override the saved account setup wizard preference for this launch.",
+)
 @click.option("-n", "--no-config-file", is_flag=True, help="Ignore config and do not persist settings.")
 def play(
     username: str | None,
     password: str | None,
     password_stdin: bool,
     account: str | None,
+    selected_accounts: tuple[str, ...],
+    additional_accounts: tuple[str, ...],
     choose_account: bool,
     no_saved_login: bool,
     play_cookie: str | None,
@@ -355,11 +390,20 @@ def play(
     game_dir_path: Path | None,
     display_game_log: bool | None,
     concurrent_downloads: int | None,
+    account_wizard: bool | None,
     no_config_file: bool,
 ) -> None:
     """Authenticate, update if necessary, and launch the game."""
     if login_mode == "playcookieandgameserver":
         ui.warning("Use --login-mode play-cookie instead of the legacy mode name.")
+    if additional_accounts and not selected_accounts:
+        raise click.UsageError("Account names must follow --accounts")
+    chosen = tuple(
+        name.strip() for item in (*selected_accounts, *additional_accounts)
+        for name in item.split(",")
+    )
+    if any(not name for name in chosen):
+        raise click.UsageError("--accounts cannot contain an empty account name")
     session_login = (
         login_mode in {"play-cookie", "playcookieandgameserver"}
         or (
@@ -370,7 +414,7 @@ def play(
     if session_login:
         if any((
             username is not None, password is not None, password_stdin,
-            account is not None, choose_account, no_saved_login,
+            account is not None, choose_account, no_saved_login, bool(chosen),
         )):
             raise click.UsageError("Play-cookie login cannot be combined with account login options")
         play_cookie = _session_value(play_cookie, "Play cookie", secret=True)
@@ -387,6 +431,8 @@ def play(
             if not password:
                 raise click.UsageError("No password was provided on standard input")
     config = Config(config_path, disabled=no_config_file)
+    if account_wizard is not None:
+        config.account_wizard_override = account_wizard
     launcher = Launcher(
         game_dir_path or Path(config.get("game_dir_path")),
         config.get("display_game_log") if display_game_log is None else display_game_log,
@@ -396,7 +442,8 @@ def play(
     if not session_login:
         accounts = Accounts(config)
         selections = _selected_credentials(
-            accounts, config, account, username, password, choose_account, no_saved_login
+            accounts, config, account, username, password, choose_account,
+            no_saved_login, chosen,
         )
         if print_play_cookie_and_game_server and len(selections) > 1:
             raise click.UsageError(
@@ -476,12 +523,102 @@ def play(
             )
 
 
-@main.group()
+@main.group(invoke_without_command=True)
 @click.option("--config-path", type=click.Path(path_type=Path), default=None)
 @click.pass_context
 def accounts(ctx: click.Context, config_path: Path | None) -> None:
-    """Manage accounts whose secrets are stored in the OS keyring."""
+    """Manage saved accounts (interactive menu with no subcommand)."""
     ctx.obj = Accounts(Config(config_path))
+    if ctx.invoked_subcommand is None:
+        _account_manager(ctx.obj)
+
+
+def _edit_account_password(saved: Accounts, username: str) -> None:
+    """Verify a replacement before explicitly overwriting the keyring."""
+    warning = (
+        f"Editing the password for {saved.label(username)} will overwrite/save "
+        "its secret in the operating system keyring and enable save_password=yes."
+    )
+    ui.warning(warning)
+    if _select("Proceed?", [("Yes, replace keyring password", "yes"), ("Cancel", "no")]) != "yes":
+        return
+    password = _prompt_text("New password", password=True)
+    with AuthClient() as auth:
+        auth.login(
+            username, password,
+            prompt_token=lambda msg: _prompt_text(msg, password=True),
+            display=ui.info,
+        )
+    saved.set_password_policy(username, "yes", password=password)
+    ui.success("Verified password saved to the OS keyring.")
+
+
+def _account_manager(saved: Accounts) -> None:
+    """Guided editor, independent of the automatic setup wizard setting."""
+    while True:
+        choices = [(saved.label(name), name) for name in saved.usernames]
+        choices.extend([("+ Add account", "__add__"), ("Exit", "__exit__")])
+        selected = _select("Select an account to manage:", choices)
+        if selected == "__exit__":
+            return
+        if selected == "__add__":
+            # Use the explicit command's existing authentication and add flow.
+            click.get_current_context().invoke(accounts_add)
+            continue
+        username = saved.resolve(selected)
+        while username in saved.usernames:
+            record = saved.account(username)
+            option = _select(
+                f"Manage {saved.label(username)}:",
+                [
+                    ("Edit password (overwrite/save OS keyring)", "password"),
+                    (f"Change save password behavior ({record['save_password']})", "policy"),
+                    ("Edit alias", "alias"),
+                    (f"Auto-login: {'on' if record['auto_login'] else 'off'}", "auto"),
+                    ("Launch this account", "play"),
+                    ("Remove this account", "remove"),
+                    ("Back to accounts", "back"),
+                ],
+            )
+            if option == "back":
+                break
+            if option == "password":
+                _edit_account_password(saved, username)
+            elif option == "policy":
+                policy = _password_policy_choice()
+                if policy == "yes":
+                    try:
+                        saved.set_password_policy(username, "yes")
+                    except CredentialError:
+                        ui.info("No usable saved password. Set one using Edit password.")
+                        continue
+                else:
+                    saved.set_password_policy(username, policy)
+                ui.success(f"Password behavior: {policy}.")
+            elif option == "alias":
+                alias = _prompt_optional_alias()
+                saved.set_alias(username, alias)
+                ui.success(f"Account alias: {saved.label(username)}")
+            elif option == "auto":
+                selected_accounts = saved.auto_login_accounts
+                if username in selected_accounts:
+                    selected_accounts.remove(username)
+                else:
+                    selected_accounts.append(username)
+                saved.set_auto_login(selected_accounts)
+                ui.success("Auto-login selection updated.")
+            elif option == "play":
+                click.get_current_context().parent.invoke(
+                    play, account=username, config_path=saved.config.path
+                )
+                return
+            elif option == "remove" and _select(
+                "Remove account and any saved keyring password?",
+                [("Remove", "yes"), ("Cancel", "no")],
+            ) == "yes":
+                saved.remove(username)
+                ui.success(f"Removed {username}.")
+                break
 
 
 @accounts.command("list")
@@ -490,11 +627,10 @@ def accounts_list(saved: Accounts) -> None:
     """List saved usernames without displaying secrets."""
     ui.accounts_list(
         saved.usernames,
-        default_account=saved.config.get("default_account"),
         auto_login=bool(saved.auto_login_accounts),
         auto_login_accounts=saved.auto_login_accounts,
-        nicknames={
-            item["username"]: item["nickname"] for item in saved.records
+        aliases={
+            item["username"]: item["alias"] for item in saved.records
         },
         password_policies={
             item["username"]: item["save_password"] for item in saved.records
@@ -504,7 +640,7 @@ def accounts_list(saved: Accounts) -> None:
 
 @accounts.command("add")
 @click.option("--username", help="Username to add.")
-@click.option("--nickname", help="Optional friendly label for the account.")
+@click.option("--alias", help="Optional unique account alias (no spaces).")
 @click.option(
     "--save-password",
     type=click.Choice(sorted(PASSWORD_POLICIES)),
@@ -521,7 +657,7 @@ def accounts_list(saved: Accounts) -> None:
 def accounts_add(
     saved: Accounts,
     username: str | None,
-    nickname: str | None,
+    alias: str | None,
     save_password: str | None,
     auto_login: bool | None,
     exclusive_auto_login: bool,
@@ -552,9 +688,11 @@ def accounts_add(
     policy = save_password or (
         _password_policy_choice() if _interactive() else "yes"
     )
+    if alias is None and _interactive():
+        alias = _prompt_optional_alias()
     _save_account(
         saved, username, password, choice,
-        nickname=nickname, save_password=policy,
+        alias=alias, save_password=policy,
     )
     ui.success(f"Saved {username!r} securely.")
 
@@ -578,29 +716,19 @@ def accounts_clear(saved: Accounts) -> None:
     ui.success("All saved accounts removed.")
 
 
-@accounts.command("default")
+@accounts.command("alias")
 @click.argument("username")
+@click.argument("alias", required=False)
+@click.option("--clear", is_flag=True, help="Remove the alias.")
 @click.pass_obj
-def accounts_default(saved: Accounts, username: str) -> None:
-    """Choose the default remembered account."""
-    canonical = saved.resolve(username)
-    saved.config.set("default_account", canonical)
-    ui.success(f"Default account: {saved.label(canonical)}")
-
-
-@accounts.command("nickname")
-@click.argument("username")
-@click.argument("nickname", required=False)
-@click.option("--clear", is_flag=True, help="Remove the nickname.")
-@click.pass_obj
-def accounts_nickname(
-    saved: Accounts, username: str, nickname: str | None, clear: bool
+def accounts_alias(
+    saved: Accounts, username: str, alias: str | None, clear: bool
 ) -> None:
-    """Give a saved account a friendly name; use --clear to remove it."""
-    if clear == (nickname is not None):
-        raise click.UsageError("Provide a nickname or use --clear")
+    """Give an account a CLI-friendly alias; use --clear to remove it."""
+    if clear == (alias is not None):
+        raise click.UsageError("Provide an alias or use --clear")
     canonical = saved.resolve(username)
-    saved.set_nickname(canonical, None if clear else nickname)
+    saved.set_alias(canonical, None if clear else alias)
     ui.success(f"Account label: {saved.label(canonical)}")
 
 
@@ -656,10 +784,9 @@ def accounts_auto_login(saved: Accounts, action: str | None, usernames: tuple[st
     elif action == "on":
         selected = saved.auto_login_accounts
         if not selected:
-            default = saved.config.get("default_account")
-            if default not in saved.usernames:
-                raise click.ClickException("Choose a default saved account first")
-            selected = [default]
+            if not saved.usernames:
+                raise click.ClickException("Save an account first")
+            selected = [saved.usernames[0]]
     elif action == "off":
         selected = []
     else:
@@ -700,7 +827,7 @@ def config_get(settings: Config, key: str) -> None:
 @click.pass_obj
 def config_set(settings: Config, key: str, value: str) -> None:
     key = key.replace("-", "_")
-    if key in {"accounts", "default_account", "auto_login", "auto_login_accounts"}:
+    if key == "accounts":
         raise click.ClickException("Manage accounts through gttrl accounts instead")
     try:
         parsed = json.loads(value)
@@ -714,7 +841,7 @@ def config_set(settings: Config, key: str, value: str) -> None:
 @click.confirmation_option(prompt="Reset launcher preferences?")
 @click.pass_obj
 def config_reset(settings: Config) -> None:
-    for key in ("game_dir_path", "display_game_log", "skip_update", "concurrent_downloads", "save_prompt"):
+    for key in ("game_dir_path", "display_game_log", "skip_update", "concurrent_downloads", "account_wizard"):
         settings.data[key] = DEFAULTS[key]
     settings.save()
     ui.success("Preferences reset. Saved accounts preserved.")

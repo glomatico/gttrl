@@ -18,7 +18,6 @@ def make_accounts(path, users=("alice", "bob"), selected=("alice",)):
                 user, auto_login=user in selected, save_password="yes"
             ) for user in users
         ],
-        default_account=users[0],
     )
     return config
 
@@ -35,7 +34,7 @@ def test_auto_login_selection_commands(tmp_path):
     assert invoke("list").output == "alice\nbob\n"
     assert Accounts(Config(path)).auto_login_accounts == ["alice", "bob"]
     listed = runner.invoke(main, ["accounts", "--config-path", str(path), "list"])
-    assert "alice (default) (auto-login)" in listed.output
+    assert "alice (auto-login)" in listed.output
     assert "bob (auto-login)" in listed.output
     assert "charlie" in listed.output
     assert invoke("off").exit_code == 0
@@ -259,7 +258,7 @@ def test_second_account_add_prompt_choices(
     assert saved and saved[0][0] == "bob"
     fresh = Config(settings.path)
     assert Accounts(fresh).auto_login_accounts == expected
-    assert fresh.get("default_account") == default
+    assert "default_account" not in fresh.data
 
 
 @pytest.mark.parametrize(
@@ -287,13 +286,14 @@ def test_remember_second_account_login_prompt(
     )
     monkeypatch.setattr("gttrl.credentials.Accounts._check_backend", lambda *args: None)
     monkeypatch.setattr("gttrl.credentials.keyring.set_password", lambda *args: None)
+    monkeypatch.setattr("gttrl.cli._prompt_optional_alias", lambda: None)
     _ask_save(settings, accounts, "bob", "secret")
     assert [value for _, value in seen] == [
         "exclusive", "add", "save", "no", "never"
     ]
     fresh = Config(settings.path)
     assert Accounts(fresh).auto_login_accounts == expected
-    assert fresh.get("default_account") == default
+    assert "default_account" not in fresh.data
     assert ("bob" in Accounts(fresh).usernames) == (choice != "no")
 
 
@@ -349,4 +349,4 @@ def test_accounts_add_explicit_modes_noninteractive(
     assert result.exit_code == 0, result.output
     actual = Config(config.path)
     assert Accounts(actual).auto_login_accounts == expected
-    assert actual.get("default_account") == default
+    assert "default_account" not in actual.data

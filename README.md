@@ -11,7 +11,7 @@ and download progress use Rich. Machine-readable output remains plain text.
 
 - **Multi-toon / multi-login:** select several remembered accounts and start a separate
   Toontown Rewritten instance for each with a single `gttrl` command.
-- **Secure account management:** per-account nicknames, auto-login preferences,
+- **Secure account management:** per-account CLI aliases, auto-login preferences,
   and password policies. Passwords are stored in the system keyring only when
   the account is configured to use it.
 - **Multiple authentication methods:** username/password, saved accounts, or a
@@ -49,8 +49,11 @@ uv tool install gttrl
 gttrl                  # Launch the game (same as gttrl play)
 gttrl play             # Explicitly launch the game
 gttrl play --account myuser
+gttrl play --accounts toon1 toon2      # Launch only these aliases
+gttrl play --accounts toon1,toon2     # Comma-separated works too
 gttrl play --choose-account
 gttrl play --no-saved-login
+gttrl play --no-account-wizard        # Override config for this run
 ```
 
 With no account remembered, GTTRL prompts for your username and password. After successful authentication, it offers to:
@@ -58,7 +61,7 @@ With no account remembered, GTTRL prompts for your username and password. After 
 1. **Save and enable automatic login:** register the account and add it to the accounts started automatically.
 2. **Save but ask each time:** register the account, but display an account picker when you run `gttrl`.
 3. **Don't save:** use your credentials for this launch only.
-4. **Never ask again:** don't save and suppress future save prompts.
+4. **Disable the account setup wizard:** don't save and disable future account setup prompts.
 
 When registering an account, GTTRL separately asks for its password policy
 (`yes`, `ask` or `never`). Auto-login selects **which accounts** to launch,
@@ -66,10 +69,15 @@ whereas the password policy determines **how they authenticate**.
 With auto-login enabled, you may still be prompted for a password or for
 2FA/ToonGuard, depending on the account's policy and TTR's requirements.
 
-To re-enable the save prompt after choosing Never:
+The global `account_wizard` preference controls only the account setup flow.
+When disabled, use `gttrl --username USER --password-stdin` for manual
+login without registration questions. Previously configured accounts,
+saved-password policies, and multi-login continue to work unchanged.
+CLI arguments override saved settings without rewriting the configuration.
+To re-enable the setup wizard:
 
 ```sh
-gttrl config set save-prompt ask
+gttrl config set account-wizard true
 ```
 
 ### Saved accounts
@@ -77,11 +85,11 @@ gttrl config set save-prompt ask
 ```sh
 gttrl accounts add
 gttrl accounts add --username myuser --auto-login
-gttrl accounts add --username user@example.com --nickname "Red Toon" --save-password ask
+gttrl accounts                          # Interactive account manager
+gttrl accounts add --username user@example.com --alias toon1 --save-password ask
 gttrl accounts list
-gttrl accounts default myuser
-gttrl accounts nickname myuser "My Toon"
-gttrl accounts nickname myuser --clear
+gttrl accounts alias myuser toon1
+gttrl accounts alias myuser --clear
 gttrl accounts save-password myuser yes
 gttrl accounts save-password myuser ask
 gttrl accounts save-password myuser never
@@ -104,10 +112,17 @@ gttrl accounts clear
   keyring. An existing saved secret is deleted when switching to `never`.
 
 Passwords are stored via [keyring](https://pypi.org/project/keyring/) **only
-when enabled**, not in the JSON file. Nicknames are optional display names:
-when `nickname` is null, GTTRL displays the username. Commands such as
-`gttrl play --account "Red Toon"` accept a unique nickname or username.
+when enabled**, not in the JSON file. Aliases are optional, unique,
+whitespace-free account identifiers: when `alias` is null, GTTRL displays
+the username. Commands such as `gttrl play --accounts toon1 toon2` accept
+aliases or usernames, and explicitly select which accounts to launch.
 No insecure plaintext password fallback is used.
+
+Running `gttrl accounts` without a subcommand opens an interactive editor:
+choose a saved account to edit its password, password-saving behavior, alias,
+auto-login selection, or remove it. Editing a password warns that it will
+overwrite/save the keyring secret and verifies authentication before doing so.
+The manager is available even when `account_wizard` is disabled.
 
 ### Multi-toon / multi-login
 
@@ -123,7 +138,7 @@ gttrl accounts auto-login                 # Interactive multi-select menu
 gttrl accounts auto-login set alice bob   # Non-interactive selection
 gttrl accounts auto-login list            # Show selected usernames
 gttrl accounts auto-login off             # Disable automatic login
-gttrl accounts auto-login on              # Enable for your default account if none selected
+gttrl accounts auto-login on              # Enable first saved account if none selected
 gttrl                                     # Start one game instance per selected account
 ```
 
@@ -141,6 +156,8 @@ Use `gttrl play --account alice` to explicitly launch **one** account even
 when multi-login is enabled. `gttrl play --choose-account` forces the single-account
 picker. Each selected account gets its own authenticated session and game
 process; the shared game installation is checked and updated **only once**.
+If no accounts are selected for auto-login, `gttrl` shows the account picker.
+The `--accounts` option overrides every saved auto-login selection for that run.
 When `--display-game-log` is enabled, output from multiple processes may interleave.
 
 If a saved login is rejected by TTR, interactive sessions offer to re-enter the
@@ -196,16 +213,17 @@ The account records in `~/.gttrl/config.json` now look like this:
 
 ```json
 {
+  "account_wizard": true,
   "accounts": [
     {
       "username": "complicated.email@example.com",
-      "nickname": "Red Toon",
+      "alias": "toon1",
       "auto_login": true,
       "save_password": "yes"
     },
     {
       "username": "second-account",
-      "nickname": null,
+      "alias": null,
       "auto_login": true,
       "save_password": "never"
     }
@@ -215,7 +233,7 @@ The account records in `~/.gttrl/config.json` now look like this:
 
 This is an excerpt showing only `accounts`. The real file also holds
 non-sensitive settings, such as game directory and download concurrency. No
-passwords appear in JSON. The global `save_prompt` preference still governs
+passwords appear in JSON. The global `account_wizard` switch controls
 whether GTTRL offers to register previously unknown accounts.
 
 Non-sensitive settings are kept in `~/.gttrl/config.json` (on Windows, `%USERPROFILE%\.gttrl\config.json`). Existing v1 settings such as `game_dir_path`, `skip_update`, and `display_game_log` remain supported.

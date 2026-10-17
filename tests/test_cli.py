@@ -171,4 +171,4 @@ def test_never_ask_again_is_persistent(tmp_path, monkeypatch):
     monkeypatch.setattr("gttrl.cli._select", lambda *args: "never")
     monkeypatch.setattr(saved, "add", lambda *args, **kwargs: pytest.fail("Should not save"))
     _ask_save(settings, saved, "toon", "password")
-    assert Config(settings.path).get("save_prompt") == "never"
+    assert Config(settings.path).get("account_wizard") is False

@@ -37,7 +37,7 @@ def test_interactive_accounts_table(monkeypatch):
     console = Console(file=buffer, width=80, force_terminal=True, color_system=None)
     monkeypatch.setattr(ui, "console", lambda *, stderr=False: console)
     ui.accounts_list(
-        ["my[toon]", "other"], default_account="my[toon]", auto_login=True
+        ["my[toon]", "other"], auto_login=True
     )
     output = buffer.getvalue()
     assert "Saved Accounts" in output
@@ -52,12 +52,11 @@ def test_script_friendly_account_listing(tmp_path):
     path = tmp_path / "config.json"
     settings = Config(path)
     settings.set("accounts", [_account("toon1"), _account("toon2")])
-    settings.set("default_account", "toon1")
     result = CliRunner().invoke(main, [
         "accounts", "--config-path", str(path), "list"
     ])
     assert result.exit_code == 0, result.output
-    assert result.output == "toon1 (default)\ntoon2\nAuto-login: off\n"
+    assert result.output == "toon1\ntoon2\nAuto-login: off\n"
     assert "\x1b[" not in result.output
 
 
