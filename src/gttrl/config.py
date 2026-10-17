@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -19,6 +18,7 @@ DEFAULTS: dict[str, Any] = {
     "display_game_log": False,
     "skip_update": False,
     "concurrent_downloads": 3,
+    "ask_play_cookie": False,
     "accounts": [],
     "account_wizard": True,
 }
@@ -77,7 +77,7 @@ def _validate(key: str, value: Any) -> Any:
         ):
             raise click.ClickException("Aliases must not conflict with other accounts")
         return accounts
-    if key in {"display_game_log", "skip_update", "account_wizard"}:
+    if key in {"display_game_log", "skip_update", "account_wizard", "ask_play_cookie"}:
         if not isinstance(value, bool):
             raise click.ClickException(f"{key} must be true or false")
     elif key == "concurrent_downloads":
@@ -111,50 +111,14 @@ class Config:
         for key, value in loaded.items():
             if key in DEFAULTS and key != "accounts":
                 self.data[key] = _validate(key, value)
-        # Migrate the pre-wizard global opt-out without re-prompting users who
-        # previously selected "Never ask again".
-        if "account_wizard" not in loaded and loaded.get("save_prompt") == "never":
-            self.data["account_wizard"] = False
-        items = loaded.get("accounts", [])
-        if not isinstance(items, list):
-            raise click.ClickException("accounts must be a list")
-        if items and all(isinstance(value, str) for value in items):
-            # Legacy 2.0 format: old accounts were *all* held in the OS keyring.
-            enabled = loaded.get("auto_login_accounts")
-            if enabled is None:
-                default = loaded.get("default_account")
-                enabled = [default] if loaded.get("auto_login") and default else []
-            self.data["accounts"] = _validate(
-                "accounts",
-                [_account(value, auto_launch=value in enabled, save_password=True) for value in items],
-            )
-        else:
-            converted = []
-            for item in items:
-                if isinstance(item, dict) and "nickname" in item and "alias" not in item:
-                    old_nickname = item["nickname"]
-                    if isinstance(old_nickname, str):
-                        # Pre-release nicknames could contain spaces; retain
-                        # their meaning while migrating to CLI-friendly aliases.
-                        candidate = re.sub(r"[\s,]+", "_", old_nickname.strip()).lstrip("-")
-                        old_nickname = candidate or None
-                    item = {
-                        ("alias" if key == "nickname" else key): (
-                            old_nickname if key == "nickname" else value
-                        )
-                        for key, value in item.items()
-                    }
-                if isinstance(item, dict):
-                    item = dict(item)
-                    if "auto_login" in item and "auto_launch" not in item:
-                        item["auto_launch"] = item.pop("auto_login")
-                    # Pre-release policies were ask, never or yes. Only yes
-                    # requested automatic retrieval from the OS keyring.
-                    policy = item.get("save_password")
-                    if isinstance(policy, str) and policy in {"ask", "never", "yes"}:
-                        item["save_password"] = policy == "yes"
-                converted.append(item)
-            self.data["accounts"] = _validate("accounts", converted)
+        # GTTRL 1.4 stored launcher options (not accounts) directly in JSON.
+        # Retain its game settings and translate its explicit cookie login mode.
+        if (
+            "ask_play_cookie" not in loaded
+            and loaded.get("login_mode") == "playcookieandgameserver"
+        ):
+            self.data["ask_play_cookie"] = True
+        self.data["accounts"] = _validate("accounts", loaded.get("accounts", []))
 
     def get(self, key: str) -> Any:
         if key == "account_wizard" and self.account_wizard_override is not None:

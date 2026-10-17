@@ -46,6 +46,14 @@ def error(text: str) -> None:
     _message(text, prefix="✗ ", style="red", stderr=True)
 
 
+def banner(version: str) -> None:
+    """Identify the launcher without cluttering machine-readable commands."""
+    display_version = ".".join(version.split(".")[:2])
+    text = Text(f"GTTRL {display_version}", style="bold cyan")
+    console().print(text)
+    console().print()
+
+
 def accounts_list(
     usernames: Sequence[str],
     *,

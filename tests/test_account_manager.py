@@ -143,28 +143,77 @@ def test_disabled_wizard_without_accounts_requires_cli_credentials(tmp_path):
     assert "Account wizard is disabled" in result.output
 
 
-def test_explicit_wizard_flag_overrides_config_without_persisting(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("extra", [[], ["--account-wizard"]])
+def test_explicit_username_skips_account_setup_even_if_wizard_enabled(
+    tmp_path, monkeypatch, extra
 ):
     settings = Config(tmp_path / "config.json")
-    settings.set("account_wizard", False)
-    fake_launch(monkeypatch)
-    choices = []
+    settings.set("account_wizard", True)
+    logins, launched, _ = fake_launch(monkeypatch)
     monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
-    monkeypatch.setattr("gttrl.cli._yes_no", lambda message: (
-        choices.append(message) or message == "Remember this account?"
-    ))
-    monkeypatch.setattr("gttrl.cli._prompt_optional_alias", lambda: "toon1")
-    monkeypatch.setattr("gttrl.credentials.Accounts._check_backend", lambda *args: None)
+    monkeypatch.setattr(
+        "gttrl.cli._ask_save",
+        lambda *args: pytest.fail("Explicit --username should bypass setup"),
+    )
     result = CliRunner().invoke(main, [
-        "--config-path", str(settings.path), "--account-wizard",
+        "--config-path", str(settings.path), *extra,
         "--username", "email@example.com", "--password", "pw",
         "--skip-update",
     ])
     assert result.exit_code == 0, (result.output, result.exception)
-    assert choices
-    assert Config(settings.path).get("account_wizard") is False
-    assert Accounts(Config(settings.path)).resolve("toon1") == "email@example.com"
+    assert logins == [("email@example.com", "pw")]
+    assert len(launched) == 1
+    assert Config(settings.path).get("account_wizard") is True
+    assert Accounts(Config(settings.path)).usernames == []
+
+
+def test_username_only_prompts_just_for_password_and_never_runs_wizard(
+    tmp_path, monkeypatch
+):
+    settings = Config(tmp_path / "config.json")
+    settings.set("ask_play_cookie", True)
+    logins, launched, _ = fake_launch(monkeypatch)
+    messages = []
+    monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
+
+    def prompt(message, *, password=False):
+        messages.append((message, password))
+        return "typed-password"
+
+    monkeypatch.setattr("gttrl.cli._prompt_text", prompt)
+    monkeypatch.setattr(
+        "gttrl.cli._ask_save",
+        lambda *args: pytest.fail("Explicit username must skip the wizard"),
+    )
+    result = CliRunner().invoke(main, [
+        "--config-path", str(settings.path),
+        "--username", "new@example.com", "--skip-update",
+    ])
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert messages == [("Password", True)]
+    assert logins == [("new@example.com", "typed-password")]
+    assert len(launched) == 1
+    assert "GTTRL 2.0" in result.output
+    assert Accounts(Config(settings.path)).usernames == []
+
+
+def test_username_with_password_stdin_skips_setup_and_is_not_persisted(
+    tmp_path, monkeypatch
+):
+    settings = Config(tmp_path / "config.json")
+    logins, launched, _ = fake_launch(monkeypatch)
+    monkeypatch.setattr(
+        "gttrl.cli._ask_save",
+        lambda *args: pytest.fail("Explicit username must skip the wizard"),
+    )
+    result = CliRunner().invoke(main, [
+        "--config-path", str(settings.path), "--username", "one@example.com",
+        "--password-stdin", "--skip-update",
+    ], input="password-through-stdin\n")
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert logins == [("one@example.com", "password-through-stdin")]
+    assert len(launched) == 1
+    assert Accounts(Config(settings.path)).usernames == []
 
 
 def test_account_manager_alias_and_auto_login_from_bare_accounts(
@@ -201,13 +250,19 @@ def test_account_manager_add_choice_runs_account_setup(tmp_path, monkeypatch):
     assert Accounts(Config(path)).usernames == []
 
 
-def test_account_manager_edit_password_warns_and_replaces_keyring(
+def test_account_manager_only_password_saving_can_replace_keyring(
     tmp_path, monkeypatch
 ):
     settings = setup_accounts(tmp_path / "config.json")
     saved = []
-    selections = iter(["alice@example.com", "password", "yes", "back", "__exit__"])
-    monkeypatch.setattr("gttrl.cli._select", lambda *args: next(selections))
+    selections = iter(["alice@example.com", "policy", "enable", "yes", "back", "__exit__"])
+    menus = []
+
+    def choose(message, options):
+        menus.append([value for _, value in options])
+        return next(selections)
+
+    monkeypatch.setattr("gttrl.cli._select", choose)
     monkeypatch.setattr("gttrl.cli._prompt_text", lambda *args, **kwargs: "newsecret")
     monkeypatch.setattr("gttrl.credentials.Accounts._check_backend", lambda *args: None)
     monkeypatch.setattr(
@@ -229,7 +284,8 @@ def test_account_manager_edit_password_warns_and_replaces_keyring(
     monkeypatch.setattr("gttrl.cli.AuthClient", FakeAuth)
     result = CliRunner().invoke(main, ["accounts", "--config-path", str(settings.path)])
     assert result.exit_code == 0, (result.output, result.exception)
-    assert "overwrite/save" in result.output
+    assert "save/overwrite" in result.output
+    assert "password" not in menus[1]
     assert saved == [("alice@example.com", "newsecret")]
     assert Accounts(Config(settings.path)).account("toon1")["save_password"] is True
 
@@ -309,7 +365,7 @@ def test_first_account_add_prompts_for_alias(tmp_path, monkeypatch):
     assert Accounts(Config(path)).account("toon1")["save_password"] is False
 
 
-def test_migrate_old_nickname_and_globals(tmp_path):
+def test_old_2_0_accounts_are_not_migrated(tmp_path):
     path = tmp_path / "config.json"
     original = {
         "save_prompt": "never",
@@ -322,15 +378,5 @@ def test_migrate_old_nickname_and_globals(tmp_path):
         }],
     }
     path.write_text(json.dumps(original))
-    config = Config(path)
-    assert config.get("account_wizard") is False
-    assert config.get("accounts")[0]["alias"] == "Red_Toon"
-    assert json.loads(path.read_text()) == original
-    config.set("skip_update", True)
-    updated = json.loads(path.read_text())
-    assert "default_account" not in updated
-    assert "save_prompt" not in updated
-    assert "nickname" not in json.dumps(updated)
-    assert updated["accounts"][0]["alias"] == "Red_Toon"
-    assert updated["accounts"][0]["auto_launch"] is True
-    assert updated["accounts"][0]["save_password"] is True
+    with pytest.raises(Exception, match="Each account must contain"):
+        Config(path)

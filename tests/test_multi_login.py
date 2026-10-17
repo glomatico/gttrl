@@ -19,7 +19,7 @@ def make_accounts(path, users=("alice", "bob"), selected=("alice",)):
     return config
 
 
-def test_auto_launch_commands_with_legacy_alias(tmp_path):
+def test_auto_launch_commands_without_pre_release_alias(tmp_path):
     path = tmp_path / "config.json"
     make_accounts(path, users=("alice", "bob", "charlie"), selected=())
     runner = CliRunner()
@@ -35,13 +35,14 @@ def test_auto_launch_commands_with_legacy_alias(tmp_path):
     listed = invoke("list")
     assert "alice (auto-launch)" in listed.output
     assert "charlie" in listed.output
-    assert invoke("auto-login", "off").exit_code == 0
+    assert invoke("auto-launch", "off").exit_code == 0
     assert Accounts(Config(path)).auto_launch_accounts == []
     assert invoke("auto-launch", "on").exit_code == 0
     assert Accounts(Config(path)).auto_launch_accounts == ["alice"]
     invalid = invoke("auto-launch", "set", "nonexistent")
     assert invalid.exit_code != 0
     assert Accounts(Config(path)).auto_launch_accounts == ["alice"]
+    assert invoke("auto-login", "list").exit_code == 2
 
 
 def test_interactive_auto_launch_selection(tmp_path, monkeypatch):

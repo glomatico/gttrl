@@ -23,7 +23,7 @@ from .updater import Updater
 
 
 class DefaultPlayGroup(click.Group):
-    """Forward legacy `gttrl [PLAY OPTIONS]` invocations to `gttrl play`."""
+    """Allow launching with `gttrl` as well as `gttrl play`."""
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
         if not args or args[0] not in {
@@ -31,18 +31,6 @@ class DefaultPlayGroup(click.Group):
         }:
             args = ["play", *args]
         return super().parse_args(ctx, args)
-
-
-class LoginModeChoice(click.Choice):
-    """Keep the v1 spelling valid without cluttering the new help output."""
-
-    def __init__(self):
-        super().__init__(["auto", "credentials", "play-cookie"], case_sensitive=False)
-
-    def convert(self, value, param, ctx):
-        if isinstance(value, str) and value.casefold() == "playcookieandgameserver":
-            return "playcookieandgameserver"
-        return super().convert(value, param, ctx)
 
 
 def _interactive() -> bool:
@@ -219,6 +207,9 @@ def _authenticate(
     username: str,
     password: str | None,
     was_saved: bool,
+    *,
+    allow_account_wizard: bool = True,
+    quiet: bool = False,
 ):
     """Use remembered passwords when enabled; repair missing/rejected secrets."""
     remember_password = accounts.account(username)["save_password"] if was_saved else False
@@ -239,13 +230,14 @@ def _authenticate(
         password = _prompt_text("Password", password=True)
 
     while True:
-        ui.info(f"Logging in as {username}...")
+        if not quiet:
+            ui.info(f"Logging in as {username}...")
         try:
             response = auth.login(
                 username,
                 password,
                 prompt_token=lambda msg: _prompt_text(msg, password=True),
-                display=ui.info,
+                display=(lambda _message: None) if quiet else ui.info,
             )
         except LoginRejected as error:
             if not was_saved or not _interactive():
@@ -266,7 +258,8 @@ def _authenticate(
             password = _prompt_text("New password", password=True)
             should_store = remember_password
         else:
-            ui.success(f"Successfully authenticated as {username}.")
+            if not quiet:
+                ui.success(f"Successfully authenticated as {username}.")
             if was_saved and should_store:
                 try:
                     accounts.update_password(username, password)
@@ -274,7 +267,10 @@ def _authenticate(
                     ui.warning(f"Couldn't save the recovered password: {error.format_message()}")
                 else:
                     ui.success("Recovered password saved to the OS keyring.")
-            if not was_saved and config.get("account_wizard"):
+            if (
+                not quiet and not was_saved and allow_account_wizard
+                and config.get("account_wizard")
+            ):
                 _ask_save(config, accounts, username, password)
             return response
 
@@ -300,12 +296,9 @@ def main() -> None:
 @click.option("--play-cookie", help="Use an externally supplied play cookie.")
 @click.option("--game-server", help="Game server for a supplied play cookie.")
 @click.option(
-    "--login-mode",
-    type=LoginModeChoice(),
-    default="auto",
-    show_default=True,
-    help="Authentication method. 'auto' infers it from supplied options; "
-    "'playcookieandgameserver' is a legacy alias for 'play-cookie'.",
+    "--ask-play-cookie/--no-ask-play-cookie",
+    default=None,
+    help="Prompt for a play cookie and game server, or override this saved preference.",
 )
 @click.option("--print-play-cookie-and-game-server", is_flag=True, help="Print sensitive launch credentials and exit.")
 @click.option(
@@ -337,7 +330,7 @@ def play(
     no_saved_login: bool,
     play_cookie: str | None,
     game_server: str | None,
-    login_mode: str | None,
+    ask_play_cookie: bool | None,
     print_play_cookie_and_game_server: bool,
     skip_update: bool | None,
     config_path: Path | None,
@@ -348,8 +341,6 @@ def play(
     no_config_file: bool,
 ) -> None:
     """Authenticate, update if necessary, and launch the game."""
-    if login_mode == "playcookieandgameserver":
-        ui.warning("Use --login-mode play-cookie instead of the legacy mode name.")
     if additional_accounts and not selected_accounts:
         raise click.UsageError("Account names must follow --accounts")
     chosen = tuple(
@@ -358,35 +349,36 @@ def play(
     )
     if any(not name for name in chosen):
         raise click.UsageError("--accounts cannot contain an empty account name")
-    session_login = (
-        login_mode in {"play-cookie", "playcookieandgameserver"}
-        or (
-            login_mode == "auto"
-            and (play_cookie is not None or game_server is not None)
+    config = Config(config_path, disabled=no_config_file)
+    if account_wizard is not None:
+        config.account_wizard_override = account_wizard
+    explicit_credentials = any((
+        username is not None, password is not None, password_stdin,
+        account is not None, choose_account, no_saved_login, bool(chosen),
+    ))
+    cookie_options = play_cookie is not None or game_server is not None
+    if (cookie_options or ask_play_cookie is True) and explicit_credentials:
+        raise click.UsageError(
+            "Play-cookie login cannot be combined with account login options"
         )
+    session_login = (
+        cookie_options
+        or ask_play_cookie is True
+        or (ask_play_cookie is None and not explicit_credentials
+            and config.get("ask_play_cookie"))
     )
     if session_login:
-        if any((
-            username is not None, password is not None, password_stdin,
-            account is not None, choose_account, no_saved_login, bool(chosen),
-        )):
-            raise click.UsageError("Play-cookie login cannot be combined with account login options")
         play_cookie = _session_value(play_cookie, "Play cookie", secret=True)
         game_server = _session_value(game_server, "Game server")
     else:
-        if play_cookie is not None or game_server is not None:
-            raise click.UsageError(
-                "Credential login cannot use --play-cookie or --game-server"
-            )
         if password_stdin and password is not None:
             raise click.UsageError("--password and --password-stdin cannot be combined")
         if password_stdin:
             password = sys.stdin.readline().rstrip("\r\n")
             if not password:
                 raise click.UsageError("No password was provided on standard input")
-    config = Config(config_path, disabled=no_config_file)
-    if account_wizard is not None:
-        config.account_wizard_override = account_wizard
+    if not print_play_cookie_and_game_server:
+        ui.banner(__version__)
     launcher = Launcher(
         game_dir_path or Path(config.get("game_dir_path")),
         config.get("display_game_log") if display_game_log is None else display_game_log,
@@ -408,7 +400,9 @@ def play(
         with AuthClient() as auth:
             for selected_user, selected_password, was_saved in selections:
                 response = _authenticate(
-                    auth, accounts, config, selected_user, selected_password, was_saved
+                    auth, accounts, config, selected_user, selected_password, was_saved,
+                    allow_account_wizard=username is None,
+                    quiet=print_play_cookie_and_game_server,
                 )
                 if response is not None:
                     sessions.append((selected_user, response))
@@ -483,18 +477,20 @@ def play(
 def accounts(ctx: click.Context, config_path: Path | None) -> None:
     """Manage saved accounts (interactive menu with no subcommand)."""
     ctx.obj = Accounts(Config(config_path))
+    if ctx.invoked_subcommand is None or ctx.invoked_subcommand == "add":
+        ui.banner(__version__)
     if ctx.invoked_subcommand is None:
         _account_manager(ctx.obj)
 
 
-def _edit_account_password(saved: Accounts, username: str) -> None:
-    """Verify a replacement before explicitly overwriting the keyring."""
+def _enable_password_saving(saved: Accounts, username: str) -> None:
+    """Verify credentials before enabling/overwriting a keyring secret."""
     warning = (
-        f"Editing the password for {saved.label(username)} will overwrite/save "
-        "its secret in the operating system keyring and enable save_password=true."
+        f"Enabling password saving for {saved.label(username)} will save/overwrite "
+        "its password in your operating system keyring."
     )
     ui.warning(warning)
-    if _select("Proceed?", [("Yes, replace keyring password", "yes"), ("Cancel", "no")]) != "yes":
+    if _select("Proceed?", [("Yes, enter a new password", "yes"), ("Back", "no")]) != "yes":
         return
     password = _prompt_text("New password", password=True)
     with AuthClient() as auth:
@@ -525,7 +521,6 @@ def _account_manager(saved: Accounts) -> None:
             option = _select(
                 f"Manage {saved.label(username)}:",
                 [
-                    ("Edit password (overwrite/save OS keyring)", "password"),
                     (f"Edit password saving ({'enabled' if record['save_password'] else 'disabled'})", "policy"),
                     ("Edit alias", "alias"),
                     (f"Edit auto-launch ({'enabled' if record['auto_launch'] else 'disabled'})", "auto"),
@@ -536,9 +531,7 @@ def _account_manager(saved: Accounts) -> None:
             )
             if option == "back":
                 break
-            if option == "password":
-                _edit_account_password(saved, username)
-            elif option == "policy":
+            if option == "policy":
                 action = _select(
                     "Password saving:",
                     [
@@ -548,7 +541,7 @@ def _account_manager(saved: Accounts) -> None:
                     ],
                 )
                 if action == "enable":
-                    _edit_account_password(saved, username)
+                    _enable_password_saving(saved, username)
                 elif action == "disable":
                     saved.set_password_saving(username, False)
                     ui.success("Password saving disabled; keyring secret removed.")
@@ -689,7 +682,7 @@ def accounts_save_password(saved: Accounts, username: str, policy: str) -> None:
     """Control use of OS-keyring passwords for a saved account."""
     canonical = saved.resolve(username)
     if policy == "enable":
-        _edit_account_password(saved, canonical)
+        _enable_password_saving(saved, canonical)
     else:
         saved.set_password_saving(canonical, False)
         ui.success(f"Password saving disabled for {saved.label(canonical)}.")
@@ -735,11 +728,6 @@ def accounts_auto_launch(saved: Accounts, action: str | None, usernames: tuple[s
         f"Auto-launch configured for {len(selected)} account(s)."
     )
 
-
-# Compatibility with the pre-release CLI spelling.
-accounts.add_command(accounts_auto_launch, name="auto-login")
-
-
 @main.group()
 @click.option("--config-path", type=click.Path(path_type=Path), default=None)
 @click.pass_context
@@ -784,7 +772,10 @@ def config_set(settings: Config, key: str, value: str) -> None:
 @click.confirmation_option(prompt="Reset launcher preferences?")
 @click.pass_obj
 def config_reset(settings: Config) -> None:
-    for key in ("game_dir_path", "display_game_log", "skip_update", "concurrent_downloads", "account_wizard"):
+    for key in (
+        "game_dir_path", "display_game_log", "skip_update",
+        "concurrent_downloads", "account_wizard", "ask_play_cookie",
+    ):
         settings.data[key] = DEFAULTS[key]
     settings.save()
     ui.success("Preferences reset. Saved accounts preserved.")

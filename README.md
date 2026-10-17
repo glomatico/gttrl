@@ -1,251 +1,161 @@
-# GTTRL — Glomatico's Toontown Rewritten Launcher
+# GTTRL
 
-A lightweight, cross-platform command-line launcher for [Toontown Rewritten](https://www.toontownrewritten.com/), with secure remembered accounts, interactive login, and concurrent game updates.
+**A simple launcher for [Toontown Rewritten](https://www.toontownrewritten.com/).**
 
-Interactive prompts use Questionary; human-facing status messages, account tables,
-and download progress use Rich. Machine-readable output remains plain text.
+GTTRL lets you log in, keep your game up to date, and launch multiple Toons from one place. It works on **Windows, macOS, and Linux**.
 
-> GTTRL is an unofficial community project and is not affiliated with the Toontown Rewritten team.
+> GTTRL is a fan-made project and isn't affiliated with the Toontown Rewritten team.
 
-## Features
+## What can GTTRL do?
 
-- **Multi-toon / multi-login:** select several remembered accounts and start a separate
-  Toontown Rewritten instance for each with a single `gttrl` command.
-- **Secure account management:** per-account CLI aliases, auto-launch preferences,
-  and password policies. Passwords are stored in the system keyring only when
-  the account is configured to use it.
-- **Multiple authentication methods:** username/password, saved accounts, or a
-  manually supplied play cookie and game server, including ToonGuard/2FA support.
-- **Fast, safe updates:** verify files, download up to three at a time, and
-  atomically replace them only after checking their integrity.
-- **Modern interactive CLI:** Questionary menus, Rich messages and progress
-  bars, configurable settings, and scripting-friendly output.
-- **Cross-platform:** runs on Linux, Windows and macOS with Python 3.11+.
+- **Launch your game:** GTTRL signs you in and checks for game updates.
+- **Remember your accounts:** Choose whether to remember each account and its password.
+- **Play with multiple Toons:** Open a separate game window for each account you select.
+- **Use short account names:** Give an account an alias like `toon1` instead of typing a long email address.
+- **Keep your passwords safe:** When enabled, password saving uses your computer's secure password manager.
 
-## Requirements
+## Installation
 
-- Python 3.11 or newer
-- Windows, macOS, or Linux
-- Internet connectivity for authentication and updates
-- A supported OS credential manager **only if** you want to remember accounts (Windows Credential Manager, macOS Keychain, or a working desktop keyring on Linux)
+You'll need **Python 3.11 or newer**.
 
-## Install
-
-Install the package using pip:
+Install GTTRL:
 
 ```sh
 pip install gttrl
 ```
 
-Or install it as a standalone tool with uv:
+Or, if you use [uv](https://docs.astral.sh/uv/):
 
 ```sh
 uv tool install gttrl
 ```
 
-## Play
+## Your first launch
+
+Run:
 
 ```sh
-gttrl                  # Launch the game (same as gttrl play)
-gttrl play             # Explicitly launch the game
-gttrl play --account myuser
-gttrl play --accounts toon1 toon2      # Launch only these aliases
-gttrl play --accounts toon1,toon2     # Comma-separated works too
+gttrl
+```
+
+Enter your Toontown Rewritten username and password. After signing in, GTTRL can help you remember the account:
+
+1. **Remember this account?** Choose **No** to play just this time, without any more setup questions.
+2. **Account alias:** If you chose Yes, you can enter a short name such as `toon1`, or leave it blank.
+3. **Enable auto-launch?** Choose Yes if you want GTTRL to launch this account automatically when you run `gttrl`.
+4. **Remember the password?** Choose Yes to save it securely so you won't need to type it every time.
+
+**Auto-launch doesn't require saving your password.** You can have GTTRL select an account automatically and still type its password each time.
+
+If your saved password is missing, GTTRL asks for it and saves it after a successful login. Toontown Rewritten may still ask for a ToonGuard code.
+
+## Manage your accounts
+
+Run:
+
+```sh
+gttrl accounts
+```
+
+Choose an account from the menu to:
+
+- Change its alias.
+- Enable or disable auto-launch.
+- **Enable password saving:** Enter and verify a password before saving or replacing it in your computer's password manager.
+- **Disable password saving:** Remove its stored password and ask for it on future launches.
+- Launch or remove the account.
+
+You can also add a new account from this menu. The menu works even when the first-launch wizard is disabled.
+
+## Play with multiple Toons
+
+Give each account a short alias (for example, `toon1` and `toon2`), then run:
+
+```sh
+gttrl play --accounts toon1 toon2
+```
+
+GTTRL will launch a separate game window for each account. You can also choose just one:
+
+```sh
+gttrl play --account toon1
+```
+
+Normally, running `gttrl` launches every account with **auto-launch** enabled. Using `--account` or `--accounts` lets you choose who to launch **just this time**, without changing your saved choices.
+
+If you'd rather choose accounts interactively, use:
+
+```sh
 gttrl play --choose-account
-gttrl play --no-saved-login
-gttrl play --no-account-wizard        # Override config for this run
 ```
 
-With no account remembered, GTTRL prompts for a username and password.
-After a successful login, the setup wizard asks:
+## Sign in without saving anything
 
-1. **Remember this account?** Yes / No. Choosing No skips all remaining questions and doesn't store anything.
-2. **Account alias?** Optional, with no spaces.
-3. **Enable auto-launch?** Yes / No. Automatically selects this account for launching, independently of its password.
-4. **Remember the password?** Yes / No. Yes stores the password securely in the OS keyring.
-
-Auto-launch and password saving are independent: with auto-launch enabled but
-password saving disabled, GTTRL selects the account and still asks for its
-password. TTR may also require 2FA/ToonGuard.
-
-The global `account_wizard` preference controls only the account setup flow.
-When disabled, use `gttrl --username USER --password-stdin` for manual
-login without registration questions. Previously configured accounts,
-saved-password policies, and multi-login continue to work unchanged.
-CLI arguments override saved settings without rewriting the configuration.
-To re-enable the setup wizard:
+For a one-time login, use:
 
 ```sh
-gttrl config set account-wizard true
+gttrl --username you@example.com
 ```
 
-### Saved accounts
+GTTRL asks for your password, signs you in, and launches the game. **It won't start the account setup wizard**, even if the wizard is enabled.
+
+You can supply both the username and password, too:
 
 ```sh
-gttrl accounts add
-gttrl accounts add --username myuser --auto-launch
-gttrl accounts                          # Interactive account manager
-gttrl accounts add --username user@example.com --alias toon1 --no-save-password
-gttrl accounts list
-gttrl accounts alias myuser toon1
-gttrl accounts alias myuser --clear
-gttrl accounts save-password myuser enable
-gttrl accounts save-password myuser disable
-gttrl accounts auto-launch on
-gttrl accounts auto-launch off
-gttrl accounts remove myuser
-gttrl accounts clear
+gttrl --username you@example.com --password YOUR_PASSWORD
 ```
 
-`accounts add` validates credentials with TTR before registering the account.
-`save_password` is a boolean:
+However, typing a password into a command can expose it in your shell history. For scripts, `--password-stdin` is safer.
 
-- **`true`:** use the OS keyring. If the secret is missing, GTTRL prompts for
-  a password; after successful authentication it saves the password in the
-  keyring, so subsequent launches don't ask again. Rejected saved passwords
-  can also be replaced after a successful retry.
-- **`false`:** always ask for a password without retrieving it from the
-  keyring. Disabling password saving through the account manager deletes the
-  existing keyring secret.
+## Use a play cookie (advanced)
 
-Passwords are stored via [keyring](https://pypi.org/project/keyring/) **only
-when enabled**, not in the JSON file. Aliases are optional, unique,
-whitespace-free account identifiers: when `alias` is null, GTTRL displays
-the username. Commands such as `gttrl play --accounts toon1 toon2` accept
-aliases or usernames, and explicitly select which accounts to launch.
-No insecure plaintext password fallback is used.
-
-Running `gttrl accounts` without a subcommand opens an interactive editor:
-choose a saved account to edit its password, password-saving behavior, alias,
-auto-launch selection, or remove it. Editing a password warns that it will
-overwrite/save the keyring secret and verifies authentication before doing so.
-Auto-launch and password-saving menus offer **Enable / Disable / Back**.
-The manager is available even when `account_wizard` is disabled.
-
-### Multi-toon / multi-login
-
-To automatically start multiple game instances, select which saved accounts
-should log in when running `gttrl`:
+If you already have a play cookie and game server, you can launch the game without a normal account login.
 
 ```sh
-gttrl accounts add                        # Add your additional TTR accounts
-gttrl accounts add --exclusive-auto-launch # Auto-launch only this account
-gttrl accounts add --auto-launch           # Add account to auto-launch
-gttrl accounts add --no-auto-launch        # Save without auto-launching
-gttrl accounts auto-launch                 # Interactive multi-select menu
-gttrl accounts auto-launch set alice bob   # Non-interactive selection
-gttrl accounts auto-launch list            # Show selected usernames
-gttrl accounts auto-launch off             # Disable auto-launch
-gttrl accounts auto-launch on              # Enable first saved account if none selected
-gttrl                                     # Start one game instance per selected account
+gttrl --ask-play-cookie
 ```
 
-Existing configurations with string usernames and global auto-login fields
-are migrated in memory and written using the new account format on the next
-configuration change. Old `auto_login` preferences migrate to `auto_launch`;
-old `save_password: "yes"` becomes `true`, and `"ask"`/`"never"` become
-`false`. Previously saved passwords are not rewritten during migration.
-Adding accounts does not disable existing auto-launch selections.
-Use `gttrl play --account alice` to explicitly launch **one** account even
-when multi-login is enabled. `gttrl play --choose-account` forces the single-account
-picker. Each selected account gets its own authenticated session and game
-process; the shared game installation is checked and updated **only once**.
-If no accounts are selected for auto-launch, `gttrl` shows the account picker.
-The `--accounts` option overrides every saved auto-launch selection for that run.
-When `--display-game-log` is enabled, output from multiple processes may interleave.
-
-If a saved login is rejected by TTR, interactive sessions offer to re-enter the
-password, skip that account, or cancel. A successfully reauthenticated account
-with password saving enabled automatically updates its keyring entry.
-Network failures are not treated as invalid passwords.
-
-### Manual, external, and scripted login
+This asks for both values. Or you can supply them:
 
 ```sh
-gttrl play --username myuser                   # Prompt for password
-gttrl play --username myuser --password-stdin  # Read password from stdin
-gttrl play --play-cookie COOKIE --game-server HOST
-gttrl play --login-mode play-cookie             # Prompt for both session values
-gttrl play --game-server HOST                   # Prompt for the missing play cookie
-gttrl play --play-cookie COOKIE                 # Prompt for the missing game server
-gttrl play --login-mode credentials             # Explicit account login
+gttrl --play-cookie COOKIE --game-server SERVER
 ```
 
-For scripts, supply the password through a secure pipe or the system keyring. Avoid `--password` whenever possible, since command-line arguments and shell history can expose secrets.
-
-Play cookies are temporary game-launch credentials, **not** reusable login tokens. They are never saved by GTTRL. The `--print-play-cookie-and-game-server` option explicitly prints sensitive session credentials; take care when redirecting its output.
-
-The `--login-mode` option accepts `auto` (default), `credentials`, and
-`play-cookie`. In automatic mode, providing either `--play-cookie` or
-`--game-server` selects play-cookie login; any missing value is requested
-interactively. Using `--login-mode play-cookie` prompts for both values if
-neither was provided. The old `playcookieandgameserver` name remains accepted
-as a legacy alias.
-
-Account login options and play-cookie options cannot be mixed. In scripts
-without an interactive terminal, missing values produce a clear error rather
-than attempting to prompt.
-
-## Updating the game
-
-GTTRL verifies local files against the server's patch manifest, skips matching files, and downloads missing or outdated files concurrently. The default is **three simultaneous downloads**.
+If you provide only one, GTTRL asks for the other. To always use the prompts by default:
 
 ```sh
-gttrl play --concurrent-downloads 5
-gttrl config set concurrent-downloads 3
-gttrl play --skip-update
-gttrl play --check-update
+gttrl config set ask-play-cookie true
 ```
 
-Downloads are streamed to temporary files, decompressed in chunks, verified against the manifest's SHA-1 hashes, and then atomically moved into place. This prevents partial downloads from overwriting existing game files. Network timeouts and retries are enabled.
+Providing `--username`, `--account`, or `--accounts` still chooses normal account login instead. Play cookies are temporary credentials and aren't saved.
 
-The login API provides the patch manifest path for authenticated sessions; externally supplied play cookies use the default public manifest.
+## Change launcher settings
 
-## Configuration
-
-The account records in `~/.gttrl/config.json` now look like this:
-
-```json
-{
-  "account_wizard": true,
-  "accounts": [
-    {
-      "username": "complicated.email@example.com",
-      "alias": "toon1",
-      "auto_launch": true,
-      "save_password": true
-    },
-    {
-      "username": "second-account",
-      "alias": null,
-      "auto_launch": true,
-      "save_password": false
-    }
-  ]
-}
-```
-
-This is an excerpt showing only `accounts`. The real file also holds
-non-sensitive settings, such as game directory and download concurrency. No
-passwords appear in JSON. The global `account_wizard` switch controls
-whether GTTRL offers to register previously unknown accounts.
-
-Non-sensitive settings are kept in `~/.gttrl/config.json` (on Windows, `%USERPROFILE%\.gttrl\config.json`). Existing v1 settings such as `game_dir_path`, `skip_update`, and `display_game_log` remain supported.
+Some useful examples:
 
 ```sh
-gttrl config show
-gttrl config get concurrent-downloads
-gttrl config set game-dir-path "/path/to/game"
-gttrl config reset
+gttrl config show                           # View your settings
+gttrl config set account-wizard false        # Stop offering account setup
+gttrl config set ask-play-cookie false       # Use normal login by default
+gttrl config set skip-update true            # Skip update checks
+gttrl config set display-game-log true       # Show game messages
 ```
 
-Settings accept booleans (`true`/`false`), integers, and text as appropriate. `gttrl config reset` preserves saved accounts. For one-off execution without reading or writing configuration, use `gttrl play --no-config-file`.
+You can temporarily override saved settings with command options, such as `--check-update` or `--hide-game-log`. Your accounts are kept when you reset the launcher preferences.
 
-Play options override their saved equivalents. For example, `--check-update` overrides `skip_update=true`, while `--hide-game-log` overrides `display_game_log=true`.
+GTTRL stores its settings in `~/.gttrl/config.json` (or `%USERPROFILE%\.gttrl\config.json` on Windows). Passwords are stored separately in your operating system's password manager, never in the JSON file.
 
-## Development
+If you're upgrading from **GTTRL 1.4**, your game-directory, update, and game-log settings are carried forward automatically.
 
-GTTRL uses [uv](https://docs.astral.sh/uv/) for development and [uv_build](https://docs.astral.sh/uv/concepts/build-backend/) for packaging:
+## Need help?
+
+- **Password manager unavailable?** You can still play without saving your password. On Linux, saving passwords usually requires an unlocked desktop keyring.
+- **Game won't start?** Try `gttrl --display-game-log` to see more information.
+- **No terminal for questions?** Supply your login details explicitly or use accounts with saved passwords.
+
+See the [GitHub project](https://github.com/glomatico/gttrl) for issues, suggestions, and source code.
+
+## For developers
 
 ```sh
 uv sync
@@ -255,14 +165,4 @@ uv run pytest -q
 uv build
 ```
 
-The `tests/` suite mocks the TTR API and patch server. **Automated tests do not require a live TTR account.** Before publishing a release, manually test a real login, patch update, and game launch on supported platforms.
-
-Publishing to PyPI uses GitHub Actions and OIDC trusted publishing. Configure the `pypi` environment and the trusted publisher for this repository in PyPI before publishing a release tagged `vX.Y.Z`.
-
-## Troubleshooting
-
-- **No secure OS keyring available:** Start your desktop keyring service (for example, Secret Service/KWallet on Linux), or choose not to save your account.
-- **No interactive terminal:** Supply `--username` and `--password-stdin`, use `--account` with an accessible keyring, or provide both `--play-cookie` and `--game-server`.
-- **Corrupted configuration:** Correct or move the JSON file at `~/.gttrl/config.json`. Credentials are kept separately in the OS keyring.
-- **No game executable:** Ensure the game download completes successfully and `game_dir_path` points to the correct directory.
-- **Game closes immediately:** Use `gttrl play --display-game-log` to inspect missing libraries or crash messages; multi-login uses separate processes with their own session credentials.
+Tests use simulated authentication and update responses. Before release, real account login, game updates, and multi-Toon launching should also be tested. PyPI releases use GitHub Actions trusted publishing.

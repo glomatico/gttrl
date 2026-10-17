@@ -28,36 +28,35 @@ def test_legacy_settings_are_preserved(tmp_path):
     assert config.get("accounts") == []
 
 
-def test_migrates_legacy_single_auto_login_without_writing_on_read(tmp_path):
+def test_migrates_v14_launcher_options_without_writing_on_read(tmp_path):
     path = tmp_path / "config.json"
     legacy = {
-        "accounts": ["alice", "bob"], "default_account": "alice",
-        "auto_login": True, "skip_update": True,
+        "login_mode": "playcookieandgameserver",
+        "skip_update": True,
+        "display_game_log": True,
+        "game_dir_path": "/old/game",
     }
     path.write_text(json.dumps(legacy))
     config = Config(path)
-    assert config.get("accounts") == [
-        _account("alice", auto_launch=True, save_password=True),
-        _account("bob", save_password=True),
-    ]
+    assert config.get("accounts") == []
+    assert config.get("ask_play_cookie") is True
+    assert config.get("skip_update") is True
+    assert config.get("display_game_log") is True
+    assert config.get("game_dir_path") == "/old/game"
     assert json.loads(path.read_text()) == legacy
     config.set("skip_update", False)
-    assert Config(path).get("accounts") == [
-        _account("alice", auto_launch=True, save_password=True),
-        _account("bob", save_password=True),
-    ]
-    assert "auto_login_accounts" not in json.loads(path.read_text())
+    stored = json.loads(path.read_text())
+    assert stored["ask_play_cookie"] is True
+    assert stored["skip_update"] is False
+    assert "login_mode" not in stored
 
 
-def test_new_auto_login_config_does_not_reenable_legacy_default(tmp_path):
+def test_v14_default_credentials_mode_remains_credentials(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(json.dumps({
-        "accounts": ["alice"], "auto_login": True,
-        "default_account": "alice", "auto_login_accounts": [],
+        "login_mode": "credentials", "skip_update": True,
     }))
-    assert Config(path).get("accounts") == [
-        _account("alice", auto_launch=False, save_password=True)
-    ]
+    assert Config(path).get("ask_play_cookie") is False
 
 
 @pytest.mark.parametrize("contents", ["not json", "[]", '{"concurrent_downloads": 0}'])
@@ -99,29 +98,27 @@ def test_new_accounts_schema_and_validation(tmp_path):
             config.set("accounts", invalid)
 
 
-@pytest.mark.parametrize(
-    ("old_policy", "expected"),
-    [("yes", True), ("ask", False), ("never", False)],
-)
-def test_migrate_old_password_policies_and_autologin(
-    tmp_path, old_policy, expected
-):
+@pytest.mark.parametrize("obsolete", [
+    ["toon@example.com"],
+    [{"username": "toon@example.com", "alias": None, "auto_login": True, "save_password": "yes"}],
+    [{"username": "toon@example.com", "alias": None, "auto_launch": True, "save_password": "ask"}],
+])
+def test_intermediate_2_0_account_formats_are_not_migrated(tmp_path, obsolete):
     path = tmp_path / "config.json"
-    old = {
-        "account_wizard": True,
-        "accounts": [{
-            "username": "toon@example.com", "alias": "toon",
-            "auto_login": True, "save_password": old_policy,
-        }],
-    }
-    path.write_text(json.dumps(old))
-    settings = Config(path)
-    assert settings.get("accounts") == [
-        _account("toon@example.com", alias="toon", auto_launch=True, save_password=expected)
-    ]
-    assert json.loads(path.read_text()) == old
-    settings.set("skip_update", True)
-    stored = json.loads(path.read_text())
-    assert stored["accounts"][0]["auto_launch"] is True
-    assert stored["accounts"][0]["save_password"] is expected
-    assert "auto_login" not in stored["accounts"][0]
+    path.write_text(json.dumps({"accounts": obsolete}))
+    with pytest.raises(ClickException):
+        Config(path)
+
+
+def test_v14_config_never_imports_secret_fields(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({
+        "login_mode": "credentials",
+        "username": "legacy@example.com", "password": "private-secret",
+    }))
+    config = Config(path)
+    config.set("ask_play_cookie", False)
+    data = json.loads(path.read_text())
+    assert "username" not in data
+    assert "password" not in data
+    assert "private-secret" not in path.read_text()
