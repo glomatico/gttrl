@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 from click import ClickException
@@ -14,7 +15,8 @@ def test_new_config_and_permissions(tmp_path):
     assert json.loads(path.read_text())["save_prompt"] == "ask"
     config.set("save_prompt", "never")
     assert Config(path).get("save_prompt") == "never"
-    assert path.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_legacy_settings_are_preserved(tmp_path):

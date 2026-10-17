@@ -32,7 +32,10 @@ def test_reject_manifest_path_through_symlink(tmp_path):
     game_dir.mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
-    (game_dir / "linked").symlink_to(outside, target_is_directory=True)
+    try:
+        (game_dir / "linked").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Directory symlinks are unavailable on this runner")
     with pytest.raises(click.ClickException, match="escapes"):
         _safe_destination(game_dir, "linked/phase.mf")
 
