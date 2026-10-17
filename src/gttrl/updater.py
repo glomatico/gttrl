@@ -23,6 +23,7 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
+from . import ui
 from .constants import DEFAULT_PATCH_MANIFEST
 
 DOWNLOAD_BASE = "https://download.toontownrewritten.com/patches/"
@@ -131,9 +132,9 @@ class Updater:
                 if not path.is_file() or await asyncio.to_thread(sha1_file, path) != expected.lower():
                     downloads.append((name, remote, path, expected))
             if not downloads:
-                click.echo("Game files are already up to date.")
+                ui.success("Game files are already up to date.")
                 return 0
-            click.echo(f"Updating {len(downloads)} game file(s), {self.concurrency} at a time.")
+            ui.info(f"Updating {len(downloads)} game file(s), {self.concurrency} at a time.")
             semaphore = asyncio.Semaphore(self.concurrency)
             progress = Progress(
                 TextColumn("{task.description}"),
@@ -141,6 +142,7 @@ class Updater:
                 TaskProgressColumn(),
                 DownloadColumn(),
                 TransferSpeedColumn(),
+                console=ui.console(),
                 transient=True,
                 disable=not show_progress,
             )
@@ -153,6 +155,7 @@ class Updater:
                         finally:
                             progress.remove_task(task)
                 await asyncio.gather(*(worker(*item) for item in downloads))
+            ui.success(f"Updated {len(downloads)} game file(s).")
             return len(downloads)
 
     async def _download_one(

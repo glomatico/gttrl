@@ -7,6 +7,7 @@
 - Implement repeated 2FA challenges, queue updates, and dynamic manifest selection.
 - Add three concurrent, verified and atomic game file downloads (configurable).
 - Add interactive prompts and Rich progress indicators.
+- Use consistent Rich status messages and an interactive saved-accounts table without changing script output.
 - Move project packaging and dependency management from Flit to uv/uv_build.
 - Introduce regression tests, cross-platform CI, and trusted PyPI publishing.
 - Require Python 3.11 or newer.

@@ -12,7 +12,7 @@ import click
 import httpx
 import questionary
 
-from . import __version__
+from . import __version__, ui
 from .auth import AuthClient
 from .config import DEFAULTS, Config
 from .credentials import Accounts, CredentialError
@@ -76,9 +76,9 @@ def _ask_save(config: Config, accounts: Accounts, username: str, password: str) 
         try:
             accounts.add(username, password, auto_login=choice == "auto")
         except CredentialError as error:
-            click.echo(f"Couldn't remember account: {error.format_message()}", err=True)
+            ui.error(f"Couldn't remember account: {error.format_message()}")
         else:
-            click.echo("Account securely saved to your OS keyring.")
+            ui.success("Account securely saved to your OS keyring.")
 
 
 def _choose_credentials(
@@ -169,7 +169,7 @@ def play(
         if not password:
             raise click.UsageError("No password was provided on standard input")
     if login_mode:
-        click.echo("Warning: --login-mode is deprecated; authentication is now automatic.", err=True)
+        ui.warning("--login-mode is deprecated; authentication is now automatic.")
         if login_mode == "playcookieandgameserver" and not (play_cookie or game_server):
             raise click.UsageError("This mode needs --play-cookie and --game-server")
         if login_mode == "credentials" and (play_cookie or game_server):
@@ -190,9 +190,15 @@ def play(
         username, password, was_saved = _choose_credentials(
             accounts, config, account, username, password, choose_account, no_saved_login
         )
-        click.echo("Logging in...")
+        ui.info("Logging in...")
         with AuthClient() as auth:
-            response = auth.login(username, password, prompt_token=lambda msg: _prompt_text(msg, password=True))
+            response = auth.login(
+                username,
+                password,
+                prompt_token=lambda msg: _prompt_text(msg, password=True),
+                display=ui.info,
+            )
+        ui.success("Login successful.")
         play_cookie, game_server, manifest = (
             response.play_cookie, response.game_server, response.manifest
         )
@@ -202,7 +208,7 @@ def play(
         click.echo(f"Play cookie: {play_cookie}\nGame server: {game_server}")
         return
     if not (config.get("skip_update") if skip_update is None else skip_update):
-        click.echo("Checking game files...")
+        ui.info("Checking game files...")
         host_os = (
             "win64" if sys.platform == "win32" and platform.architecture()[0] == "64bit"
             else sys.platform
@@ -218,7 +224,7 @@ def play(
             raise click.ClickException(f"Game update failed: {error}") from error
         except httpx.HTTPError as error:
             raise click.ClickException(f"Game update network error: {error}") from error
-    click.echo("Launching Toontown Rewritten...")
+    ui.info("Launching Toontown Rewritten...")
     launcher.launch_game(play_cookie, game_server)
 
 
@@ -234,12 +240,11 @@ def accounts(ctx: click.Context, config_path: Path | None) -> None:
 @click.pass_obj
 def accounts_list(saved: Accounts) -> None:
     """List saved usernames without displaying secrets."""
-    if not saved.usernames:
-        click.echo("No saved accounts.")
-    for name in saved.usernames:
-        label = " (default)" if name == saved.config.get("default_account") else ""
-        click.echo(f"{name}{label}")
-    click.echo(f"Auto-login: {'on' if saved.config.get('auto_login') else 'off'}")
+    ui.accounts_list(
+        saved.usernames,
+        default_account=saved.config.get("default_account"),
+        auto_login=saved.config.get("auto_login"),
+    )
 
 
 @accounts.command("add")
@@ -258,7 +263,7 @@ def accounts_add(saved: Accounts, username: str | None, auto_login: bool | None)
         else:
             auto_login = _select("Enable automatic login?", [("Yes", True), ("No, ask each time", False)])
     saved.add(username, password, auto_login=auto_login)
-    click.echo(f"Saved {username!r} securely.")
+    ui.success(f"Saved {username!r} securely.")
 
 
 @accounts.command("remove")
@@ -267,7 +272,7 @@ def accounts_add(saved: Accounts, username: str | None, auto_login: bool | None)
 def accounts_remove(saved: Accounts, username: str) -> None:
     """Remove one saved account and its secret."""
     saved.remove(username)
-    click.echo(f"Removed {username!r}.")
+    ui.success(f"Removed {username!r}.")
 
 
 @accounts.command("clear")
@@ -277,7 +282,7 @@ def accounts_clear(saved: Accounts) -> None:
     """Remove all saved accounts from the OS keyring."""
     for username in saved.usernames:
         saved.remove(username)
-    click.echo("All saved accounts removed.")
+    ui.success("All saved accounts removed.")
 
 
 @accounts.command("default")
@@ -288,7 +293,7 @@ def accounts_default(saved: Accounts, username: str) -> None:
     if username not in saved.usernames:
         raise click.ClickException(f"Account {username!r} is not saved")
     saved.config.set("default_account", username)
-    click.echo(f"Default account: {username}")
+    ui.success(f"Default account: {username}")
 
 
 @accounts.command("auto-login")
@@ -299,7 +304,7 @@ def accounts_auto_login(saved: Accounts, state: str) -> None:
     if state == "on" and saved.config.get("default_account") not in saved.usernames:
         raise click.ClickException("Choose a default saved account first")
     saved.config.set("auto_login", state == "on")
-    click.echo(f"Auto-login: {state}")
+    ui.success(f"Auto-login: {state}")
 
 
 @main.group()
@@ -339,7 +344,7 @@ def config_set(settings: Config, key: str, value: str) -> None:
     except ValueError:
         parsed = value
     settings.set(key, parsed)
-    click.echo(f"{key} updated.")
+    ui.success(f"{key} updated.")
 
 
 @config.command("reset")
@@ -349,4 +354,4 @@ def config_reset(settings: Config) -> None:
     for key in ("game_dir_path", "display_game_log", "skip_update", "concurrent_downloads", "save_prompt"):
         settings.data[key] = DEFAULTS[key]
     settings.save()
-    click.echo("Preferences reset. Saved accounts preserved.")
+    ui.success("Preferences reset. Saved accounts preserved.")

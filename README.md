@@ -2,6 +2,9 @@
 
 A lightweight, cross-platform command-line launcher for [Toontown Rewritten](https://www.toontownrewritten.com/), with secure remembered accounts, interactive login, and concurrent game updates.
 
+Interactive prompts use Questionary; human-facing status messages, account tables,
+and download progress use Rich. Machine-readable output remains plain text.
+
 > GTTRL is an unofficial community project and is not affiliated with the Toontown Rewritten team.
 
 ## Requirements
