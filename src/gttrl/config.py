@@ -20,6 +20,7 @@ DEFAULTS: dict[str, Any] = {
     "accounts": [],
     "default_account": None,
     "auto_login": False,
+    "auto_login_accounts": [],
     "save_prompt": "ask",
 }
 
@@ -27,11 +28,11 @@ DEFAULTS: dict[str, Any] = {
 def _validate(key: str, value: Any) -> Any:
     if key not in DEFAULTS:
         raise click.ClickException(f"Unknown setting: {key}")
-    if key == "accounts":
+    if key in {"accounts", "auto_login_accounts"}:
         if not isinstance(value, list) or not all(
             isinstance(item, str) and item for item in value
         ) or len(set(value)) != len(value):
-            raise click.ClickException("accounts must be a list of unique usernames")
+            raise click.ClickException(f"{key} must be a list of unique usernames")
     elif key in {"display_game_log", "skip_update", "auto_login"}:
         if not isinstance(value, bool):
             raise click.ClickException(f"{key} must be true or false")
@@ -53,7 +54,7 @@ class Config:
     def __init__(self, path: Path | None = None, *, disabled: bool = False):
         self.path = path or config_path()
         self.disabled = disabled
-        self.data = {**DEFAULTS, "accounts": []}
+        self.data = {**DEFAULTS, "accounts": [], "auto_login_accounts": []}
         if disabled:
             return
         if self.path.exists():
@@ -66,6 +67,13 @@ class Config:
             for key, value in loaded.items():
                 if key in DEFAULTS:
                     self.data[key] = _validate(key, value)
+            # Migrate the old single-account preference in memory. It is
+            # persisted on the next configuration change, not on read.
+            if "auto_login_accounts" not in loaded:
+                default = self.data["default_account"]
+                if self.data["auto_login"] and default in self.data["accounts"]:
+                    self.data["auto_login_accounts"] = [default]
+            self.data["auto_login"] = bool(self.data["auto_login_accounts"])
         else:
             self.save()
 
@@ -73,9 +81,13 @@ class Config:
         return self.data[key]
 
     def set(self, key: str, value: Any) -> None:
+        self.update(**{key: value})
+
+    def update(self, **values: Any) -> None:
         if self.disabled:
             raise click.ClickException("Cannot save settings with --no-config-file")
-        self.data[key] = _validate(key, value)
+        validated = {key: _validate(key, value) for key, value in values.items()}
+        self.data.update(validated)
         self.save()
 
     def save(self) -> None:

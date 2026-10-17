@@ -28,6 +28,30 @@ def test_legacy_settings_are_preserved(tmp_path):
     assert config.get("accounts") == []
 
 
+def test_migrates_legacy_single_auto_login_without_writing_on_read(tmp_path):
+    path = tmp_path / "config.json"
+    legacy = {
+        "accounts": ["alice", "bob"], "default_account": "alice",
+        "auto_login": True, "skip_update": True,
+    }
+    path.write_text(json.dumps(legacy))
+    config = Config(path)
+    assert config.get("auto_login_accounts") == ["alice"]
+    assert json.loads(path.read_text()) == legacy
+    config.set("skip_update", False)
+    assert Config(path).get("auto_login_accounts") == ["alice"]
+
+
+def test_new_auto_login_config_does_not_reenable_legacy_default(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({
+        "accounts": ["alice"], "auto_login": True,
+        "default_account": "alice", "auto_login_accounts": [],
+    }))
+    assert Config(path).get("auto_login_accounts") == []
+    assert Config(path).get("auto_login") is False
+
+
 @pytest.mark.parametrize("contents", ["not json", "[]", '{"concurrent_downloads": 0}'])
 def test_invalid_config_reports_error(tmp_path, contents):
     path = tmp_path / "config.json"

@@ -16,13 +16,56 @@ def test_saved_accounts_and_auto_login(tmp_path, monkeypatch):
     accounts.add("toon2", "secret2", auto_login=False)
     assert accounts.usernames == ["toon1", "toon2"]
     assert config.get("default_account") == "toon1"
-    assert config.get("auto_login") is False
+    assert config.get("auto_login") is True
+    assert accounts.auto_login_accounts == ["toon1"]
     assert accounts.get("toon1") == "secret1"
     assert "secret1" not in config.path.read_text()
     accounts.remove("toon1")
     assert accounts.usernames == ["toon2"]
     assert config.get("default_account") == "toon2"
+    assert config.get("auto_login") is False
     assert passwords == {"toon2": "secret2"}
+
+
+def test_select_multiple_accounts_and_preserve_choices(tmp_path, monkeypatch):
+    passwords = {}
+    monkeypatch.setattr("gttrl.credentials.keyring.get_keyring", lambda: type("Backend", (), {"priority": 1})())
+    monkeypatch.setattr("gttrl.credentials.keyring.set_password", lambda service, name, password: passwords.__setitem__(name, password))
+    monkeypatch.setattr("gttrl.credentials.keyring.get_password", lambda service, name: passwords.get(name))
+    monkeypatch.setattr("gttrl.credentials.keyring.delete_password", lambda service, name: passwords.pop(name))
+    accounts = Accounts(Config(tmp_path / "config.json"))
+    accounts.add("alice", "pw1", auto_login=True)
+    accounts.add("bob", "pw2", auto_login=False)
+    assert accounts.auto_login_accounts == ["alice"]
+    accounts.set_auto_login(["alice", "bob"])
+    accounts.add("charlie", "pw3", auto_login=False)
+    assert accounts.auto_login_accounts == ["alice", "bob"]
+    accounts.update_password("alice", "new-password")
+    assert passwords["alice"] == "new-password"
+    assert accounts.auto_login_accounts == ["alice", "bob"]
+    accounts.remove("alice")
+    assert accounts.auto_login_accounts == ["bob"]
+    with pytest.raises(CredentialError, match="Unknown saved account"):
+        accounts.set_auto_login(["nonexistent"])
+    assert accounts.auto_login_accounts == ["bob"]
+
+
+def test_exclusive_auto_login_replaces_selected_accounts(tmp_path, monkeypatch):
+    passwords = {}
+    monkeypatch.setattr("gttrl.credentials.keyring.get_keyring", lambda: type("Backend", (), {"priority": 1})())
+    monkeypatch.setattr("gttrl.credentials.keyring.set_password", lambda service, name, password: passwords.__setitem__(name, password))
+    accounts = Accounts(Config(tmp_path / "config.json"))
+    accounts.add("alice", "first", auto_login=True)
+    accounts.add("bob", "second", auto_login=True)
+    assert accounts.auto_login_accounts == ["alice", "bob"]
+    accounts.add("charlie", "third", auto_login=True, exclusive_auto_login=True)
+    assert accounts.auto_login_accounts == ["charlie"]
+    assert accounts.config.get("default_account") == "charlie"
+    assert accounts.usernames == ["alice", "bob", "charlie"]
+    assert passwords == {"alice": "first", "bob": "second", "charlie": "third"}
+    with pytest.raises(CredentialError, match="requires auto_login"):
+        accounts.add("invalid", "password", exclusive_auto_login=True)
+    assert "invalid" not in passwords
 
 
 def test_no_insecure_fallback(tmp_path, monkeypatch):
