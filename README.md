@@ -1,6 +1,6 @@
 # GTTRL
 
-**A simple launcher for [Toontown Rewritten](https://www.toontownrewritten.com/).**
+**A simple command-line launcher for [Toontown Rewritten](https://www.toontownrewritten.com/).**
 
 GTTRL lets you log in, keep your game up to date, and launch multiple Toons from one place. It works on **Windows, macOS, and Linux**.
 
