@@ -6,6 +6,10 @@
 - Restore an explicit `--login-mode` selector alongside automatic detection;
   prompt for missing play-cookie or game-server values when interactive.
 - Add securely remembered accounts with separate auto-login and save-prompt preferences.
+- Store nickname, auto-login, and ask/never/yes password policy inside each
+  account record, migrating old string-based accounts without touching keyring secrets.
+- Support friendly nicknames in account selection and new account management
+  commands for nicknames and password policies.
 - Support multi-toon auto-login: choose several saved accounts and launch a
   separate game instance for each, reusing a single update check.
 - Migrate existing single-account auto-login preferences without changing the

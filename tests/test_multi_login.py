@@ -5,15 +5,27 @@ from click.testing import CliRunner
 
 from gttrl.auth import LoginError, LoginRejected
 from gttrl.cli import _ask_save, _authenticate, main
-from gttrl.config import Config
+from gttrl.config import Config, _account
 from gttrl.credentials import Accounts
 from gttrl.models import LoginResponse
 
 
+def make_accounts(path, users=("alice", "bob"), selected=("alice",)):
+    config = Config(path)
+    config.update(
+        accounts=[
+            _account(
+                user, auto_login=user in selected, save_password="yes"
+            ) for user in users
+        ],
+        default_account=users[0],
+    )
+    return config
+
+
 def test_auto_login_selection_commands(tmp_path):
     path = tmp_path / "config.json"
-    settings = Config(path)
-    settings.update(accounts=["alice", "bob", "charlie"], default_account="alice")
+    make_accounts(path, users=("alice", "bob", "charlie"), selected=())
     runner = CliRunner()
 
     def invoke(*args):
@@ -21,26 +33,22 @@ def test_auto_login_selection_commands(tmp_path):
 
     assert invoke("set", "alice", "bob").exit_code == 0
     assert invoke("list").output == "alice\nbob\n"
-    assert Config(path).get("auto_login") is True
+    assert Accounts(Config(path)).auto_login_accounts == ["alice", "bob"]
     listed = runner.invoke(main, ["accounts", "--config-path", str(path), "list"])
     assert "alice (default) (auto-login)" in listed.output
     assert "bob (auto-login)" in listed.output
     assert "charlie" in listed.output
     assert invoke("off").exit_code == 0
-    assert Config(path).get("auto_login_accounts") == []
+    assert Accounts(Config(path)).auto_login_accounts == []
     assert invoke("on").exit_code == 0
-    assert Config(path).get("auto_login_accounts") == ["alice"]
+    assert Accounts(Config(path)).auto_login_accounts == ["alice"]
     invalid = invoke("set", "nonexistent")
     assert invalid.exit_code != 0
-    assert Config(path).get("auto_login_accounts") == ["alice"]
+    assert Accounts(Config(path)).auto_login_accounts == ["alice"]
 
 
 def test_interactive_multi_select(tmp_path, monkeypatch):
-    settings = Config(tmp_path / "config.json")
-    settings.update(
-        accounts=["alice", "bob"], default_account="alice",
-        auto_login=True, auto_login_accounts=["alice"],
-    )
+    settings = make_accounts(tmp_path / "config.json")
     captured = {}
     monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
 
@@ -58,17 +66,13 @@ def test_interactive_multi_select(tmp_path, monkeypatch):
     )
     assert result.exit_code == 0, result.output
     assert [choice.checked for choice in captured["choices"]] == [True, False]
-    assert Config(settings.path).get("auto_login_accounts") == ["alice", "bob"]
+    assert Accounts(Config(settings.path)).auto_login_accounts == ["alice", "bob"]
 
 
 def test_automatic_multi_login_updates_once_and_spawns_distinct_games(tmp_path, monkeypatch):
-    settings = Config(tmp_path / "config.json")
-    settings.update(
-        accounts=["alice", "bob"], default_account="alice",
-        auto_login=True, auto_login_accounts=["alice", "bob"],
-    )
+    settings = make_accounts(tmp_path / "config.json", selected=("alice", "bob"))
     secrets = {"alice": "pass-one", "bob": "pass-two"}
-    monkeypatch.setattr("gttrl.credentials.Accounts.get", lambda self, username: secrets[username])
+    monkeypatch.setattr("gttrl.credentials.Accounts.keyring_password", lambda self, username: secrets[username])
     auth_calls, launched, updates = [], [], []
 
     class FakeAuth:
@@ -115,12 +119,8 @@ def test_automatic_multi_login_updates_once_and_spawns_distinct_games(tmp_path, 
 
 
 def test_mismatched_multi_login_manifests_fail_before_launch(tmp_path, monkeypatch):
-    settings = Config(tmp_path / "config.json")
-    settings.update(
-        accounts=["alice", "bob"], auto_login=True,
-        auto_login_accounts=["alice", "bob"],
-    )
-    monkeypatch.setattr("gttrl.credentials.Accounts.get", lambda self, user: "pw")
+    settings = make_accounts(tmp_path / "config.json", selected=("alice", "bob"))
+    monkeypatch.setattr("gttrl.credentials.Accounts.keyring_password", lambda self, user: "pw")
 
     class FakeAuth:
         def __enter__(self):
@@ -143,8 +143,7 @@ def test_mismatched_multi_login_manifests_fail_before_launch(tmp_path, monkeypat
 
 
 def test_rejected_saved_password_prompts_and_updates_keyring(tmp_path, monkeypatch):
-    config = Config(tmp_path / "config.json")
-    config.update(accounts=["alice"], default_account="alice")
+    config = make_accounts(tmp_path / "config.json", users=("alice",))
     accounts = Accounts(config)
 
     class FakeAuth:
@@ -163,17 +162,17 @@ def test_rejected_saved_password_prompts_and_updates_keyring(tmp_path, monkeypat
     monkeypatch.setattr("gttrl.cli._select", lambda *args: next(responses))
     monkeypatch.setattr("gttrl.cli._prompt_text", lambda *args, **kwargs: "new")
     monkeypatch.setattr(
-        accounts, "update_password", lambda username, password: updated.append((username, password))
+        accounts, "set_password_policy",
+        lambda username, policy, *, password=None: updated.append((username, policy, password))
     )
     auth = FakeAuth()
     assert _authenticate(auth, accounts, config, "alice", "old", True).play_cookie == "new-cookie"
     assert auth.attempts == ["old", "new"]
-    assert updated == [("alice", "new")]
+    assert updated == [("alice", "yes", "new")]
 
 
 def test_network_failure_does_not_offer_to_replace_password(tmp_path, monkeypatch):
-    config = Config(tmp_path / "config.json")
-    config.set("accounts", ["alice"])
+    config = make_accounts(tmp_path / "config.json", users=("alice",))
     accounts = Accounts(config)
 
     class FakeAuth:
@@ -190,8 +189,7 @@ def test_network_failure_does_not_offer_to_replace_password(tmp_path, monkeypatc
 
 
 def test_skip_rejected_saved_account(tmp_path, monkeypatch):
-    config = Config(tmp_path / "config.json")
-    config.set("accounts", ["alice"])
+    config = make_accounts(tmp_path / "config.json", users=("alice",))
 
     class FakeAuth:
         def login(self, username, password, **kwargs):
@@ -213,11 +211,7 @@ def test_skip_rejected_saved_account(tmp_path, monkeypatch):
 def test_second_account_add_prompt_choices(
     tmp_path, monkeypatch, choice, expected, default
 ):
-    settings = Config(tmp_path / "config.json")
-    settings.update(
-        accounts=["alice"], default_account="alice",
-        auto_login=True, auto_login_accounts=["alice"],
-    )
+    settings = make_accounts(tmp_path / "config.json", users=("alice",))
     saved = []
     selected_choices = []
 
@@ -233,6 +227,8 @@ def test_second_account_add_prompt_choices(
             return LoginResponse("cookie", "server")
 
     def select(message, choices):
+        if "password" in message.lower():
+            return "yes"
         selected_choices.extend(choices)
         return choice
 
@@ -262,7 +258,7 @@ def test_second_account_add_prompt_choices(
     ]
     assert saved and saved[0][0] == "bob"
     fresh = Config(settings.path)
-    assert fresh.get("auto_login_accounts") == expected
+    assert Accounts(fresh).auto_login_accounts == expected
     assert fresh.get("default_account") == default
 
 
@@ -278,17 +274,16 @@ def test_second_account_add_prompt_choices(
 def test_remember_second_account_login_prompt(
     tmp_path, monkeypatch, choice, expected, default
 ):
-    settings = Config(tmp_path / "config.json")
-    settings.update(
-        accounts=["alice"], default_account="alice",
-        auto_login=True, auto_login_accounts=["alice"],
-    )
+    settings = make_accounts(tmp_path / "config.json", users=("alice",))
     accounts = Accounts(settings)
     seen = []
     monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
     monkeypatch.setattr(
         "gttrl.cli._select",
-        lambda message, choices: seen.extend(choices) or choice,
+        lambda message, choices: (
+            "yes" if "password" in message.lower()
+            else (seen.extend(choices) or choice)
+        ),
     )
     monkeypatch.setattr("gttrl.credentials.Accounts._check_backend", lambda *args: None)
     monkeypatch.setattr("gttrl.credentials.keyring.set_password", lambda *args: None)
@@ -297,9 +292,9 @@ def test_remember_second_account_login_prompt(
         "exclusive", "add", "save", "no", "never"
     ]
     fresh = Config(settings.path)
-    assert fresh.get("auto_login_accounts") == expected
+    assert Accounts(fresh).auto_login_accounts == expected
     assert fresh.get("default_account") == default
-    assert ("bob" in fresh.get("accounts")) == (choice != "no")
+    assert ("bob" in Accounts(fresh).usernames) == (choice != "no")
 
 
 def test_exclusive_and_auto_login_options_conflict(tmp_path):
@@ -325,11 +320,7 @@ def test_exclusive_and_auto_login_options_conflict(tmp_path):
 def test_accounts_add_explicit_modes_noninteractive(
     tmp_path, monkeypatch, flag, expected, default
 ):
-    config = Config(tmp_path / "config.json")
-    config.update(
-        accounts=["alice"], default_account="alice",
-        auto_login=True, auto_login_accounts=["alice"],
-    )
+    config = make_accounts(tmp_path / "config.json", users=("alice",))
 
     class FakeAuth:
         def __enter__(self):
@@ -357,5 +348,5 @@ def test_accounts_add_explicit_modes_noninteractive(
     )
     assert result.exit_code == 0, result.output
     actual = Config(config.path)
-    assert actual.get("auto_login_accounts") == expected
+    assert Accounts(actual).auto_login_accounts == expected
     assert actual.get("default_account") == default

@@ -11,8 +11,9 @@ and download progress use Rich. Machine-readable output remains plain text.
 
 - **Multi-toon / multi-login:** select several remembered accounts and start a separate
   Toontown Rewritten instance for each with a single `gttrl` command.
-- **Secure account management:** passwords are stored in your system's credential
-  manager, with optional automatic login and recovery when a saved login is rejected.
+- **Secure account management:** per-account nicknames, auto-login preferences,
+  and password policies. Passwords are stored in the system keyring only when
+  the account is configured to use it.
 - **Multiple authentication methods:** username/password, saved accounts, or a
   manually supplied play cookie and game server, including ToonGuard/2FA support.
 - **Fast, safe updates:** verify files, download up to three at a time, and
@@ -54,12 +55,16 @@ gttrl play --no-saved-login
 
 With no account remembered, GTTRL prompts for your username and password. After successful authentication, it offers to:
 
-1. **Save and enable automatic login:** remember your account securely and add it to the accounts started automatically.
-2. **Save but ask each time:** remember the account securely, but display an account picker when you run `gttrl`.
+1. **Save and enable automatic login:** register the account and add it to the accounts started automatically.
+2. **Save but ask each time:** register the account, but display an account picker when you run `gttrl`.
 3. **Don't save:** use your credentials for this launch only.
 4. **Never ask again:** don't save and suppress future save prompts.
 
-If you turn on automatic login, you may **still be prompted for 2FA or ToonGuard** when Toontown Rewritten requires it.
+When registering an account, GTTRL separately asks for its password policy
+(`yes`, `ask` or `never`). Auto-login selects **which accounts** to launch,
+whereas the password policy determines **how they authenticate**.
+With auto-login enabled, you may still be prompted for a password or for
+2FA/ToonGuard, depending on the account's policy and TTR's requirements.
 
 To re-enable the save prompt after choosing Never:
 
@@ -72,15 +77,37 @@ gttrl config set save-prompt ask
 ```sh
 gttrl accounts add
 gttrl accounts add --username myuser --auto-login
+gttrl accounts add --username user@example.com --nickname "Red Toon" --save-password ask
 gttrl accounts list
 gttrl accounts default myuser
+gttrl accounts nickname myuser "My Toon"
+gttrl accounts nickname myuser --clear
+gttrl accounts save-password myuser yes
+gttrl accounts save-password myuser ask
+gttrl accounts save-password myuser never
 gttrl accounts auto-login on
 gttrl accounts auto-login off
 gttrl accounts remove myuser
 gttrl accounts clear
 ```
 
-`accounts add` validates the account by authenticating with the TTR login API before storing anything. Passwords are stored in the operating system's credential store via [keyring](https://pypi.org/project/keyring/); only account names and non-sensitive preferences are written to the JSON config. If no secure credential store is available, GTTRL **does not fall back to saving an unprotected password**.
+`accounts add` validates the account with TTR before registering it. The
+`save_password` preference controls the login experience:
+
+- **`yes`:** use the OS keyring. If no secret is available, or the saved login
+  is rejected, GTTRL asks for a password. Following a successful recovery,
+  it offers `yes`, `ask` or `never` for subsequent logins.
+- **`ask`:** each time the account is used, choose whether to attempt a
+  saved keyring password or enter it manually. After manually entering one,
+  choose whether to keep `ask`, switch to `never`, or store it with `yes`.
+- **`never`:** always ask for a password; do not read or store one in the
+  keyring. An existing saved secret is deleted when switching to `never`.
+
+Passwords are stored via [keyring](https://pypi.org/project/keyring/) **only
+when enabled**, not in the JSON file. Nicknames are optional display names:
+when `nickname` is null, GTTRL displays the username. Commands such as
+`gttrl play --account "Red Toon"` accept a unique nickname or username.
+No insecure plaintext password fallback is used.
 
 ### Multi-toon / multi-login
 
@@ -100,7 +127,10 @@ gttrl accounts auto-login on              # Enable for your default account if n
 gttrl                                     # Start one game instance per selected account
 ```
 
-An existing 2.0 single-account auto-login configuration migrates automatically.
+Existing configurations with string usernames and global auto-login fields
+are migrated in memory and written using the new account format on the next
+configuration change; their previously keyring-backed accounts receive
+`save_password: "yes"`.
 Adding other accounts does not disable or replace existing auto-login selections.
 When adding another account interactively, GTTRL offers **Exclusive auto-login**
 (replace the selected accounts with the new account), **Add to auto-login**
@@ -161,6 +191,32 @@ Downloads are streamed to temporary files, decompressed in chunks, verified agai
 The login API provides the patch manifest path for authenticated sessions; externally supplied play cookies use the default public manifest.
 
 ## Configuration
+
+The account records in `~/.gttrl/config.json` now look like this:
+
+```json
+{
+  "accounts": [
+    {
+      "username": "complicated.email@example.com",
+      "nickname": "Red Toon",
+      "auto_login": true,
+      "save_password": "yes"
+    },
+    {
+      "username": "second-account",
+      "nickname": null,
+      "auto_login": true,
+      "save_password": "never"
+    }
+  ]
+}
+```
+
+This is an excerpt showing only `accounts`. The real file also holds
+non-sensitive settings, such as game directory and download concurrency. No
+passwords appear in JSON. The global `save_prompt` preference still governs
+whether GTTRL offers to register previously unknown accounts.
 
 Non-sensitive settings are kept in `~/.gttrl/config.json` (on Windows, `%USERPROFILE%\.gttrl\config.json`). Existing v1 settings such as `game_dir_path`, `skip_update`, and `display_game_log` remain supported.
 

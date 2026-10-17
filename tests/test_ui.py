@@ -47,11 +47,11 @@ def test_interactive_accounts_table(monkeypatch):
 
 
 def test_script_friendly_account_listing(tmp_path):
-    from gttrl.config import Config
+    from gttrl.config import Config, _account
 
     path = tmp_path / "config.json"
     settings = Config(path)
-    settings.set("accounts", ["toon1", "toon2"])
+    settings.set("accounts", [_account("toon1"), _account("toon2")])
     settings.set("default_account", "toon1")
     result = CliRunner().invoke(main, [
         "accounts", "--config-path", str(path), "list"

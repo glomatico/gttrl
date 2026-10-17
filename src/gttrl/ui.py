@@ -6,7 +6,7 @@ Click so scripts receive plain text without decorative prefixes or ANSI codes.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import click
 from rich.console import Console
@@ -52,9 +52,13 @@ def accounts_list(
     default_account: str | None,
     auto_login: bool,
     auto_login_accounts: Sequence[str] = (),
+    nicknames: Mapping[str, str | None] | None = None,
+    password_policies: Mapping[str, str] | None = None,
 ) -> None:
     """Show a table to players and a stable, plain listing to scripts."""
     terminal = console().is_terminal
+    nicknames = nicknames or {}
+    password_policies = password_policies or {}
     if not usernames:
         if terminal:
             info("No saved accounts.")
@@ -65,19 +69,25 @@ def accounts_list(
         table.add_column("Account")
         table.add_column("Default", justify="center")
         table.add_column("Auto-login", justify="center")
+        table.add_column("Password")
         for username in usernames:
+            nickname = nicknames.get(username)
+            title = f"{nickname} ({username})" if nickname else username
             table.add_row(
-                Text(username),
+                Text(title),
                 "✓" if username == default_account else "",
                 "✓" if username in auto_login_accounts else "",
+                password_policies.get(username, ""),
             )
         console().print(table)
     else:
         for username in usernames:
+            nickname = nicknames.get(username)
+            display = f"{nickname} ({username})" if nickname else username
             label = " (default)" if username == default_account else ""
             if username in auto_login_accounts:
                 label += " (auto-login)"
-            click.echo(f"{username}{label}")
+            click.echo(f"{display}{label}")
     summary = f"Auto-login: {'on' if auto_login else 'off'}"
     if terminal:
         info(summary)
