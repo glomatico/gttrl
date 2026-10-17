@@ -1,4 +1,4 @@
-"""Per-account password policy and alias behavior."""
+"""Per-account boolean password saving and secure recovery behavior."""
 
 import pytest
 from click.testing import CliRunner
@@ -32,18 +32,16 @@ def keyring_stub(monkeypatch):
     return saved
 
 
-def configured(tmp_path, *, policy="yes", alias=None, auto_login=True):
+def configured(tmp_path, *, save=True, alias=None, auto_launch=True):
     config = Config(tmp_path / "config.json")
-    config.update(
-        accounts=[
-            _account(
-                "complicated.address@example.com",
-                alias=alias,
-                save_password=policy,
-                auto_login=auto_login,
-            ),
-        ],
-    )
+    config.set("accounts", [
+        _account(
+            "complicated.address@example.com",
+            alias=alias,
+            save_password=save,
+            auto_launch=auto_launch,
+        )
+    ])
     return config, Accounts(config)
 
 
@@ -59,143 +57,131 @@ class FakeAuth:
         return LoginResponse("cookie", "host")
 
 
-def test_yes_policy_reads_keyring_without_prompt(tmp_path, monkeypatch, keyring_stub):
+def test_saved_password_reads_keyring_without_prompt(tmp_path, monkeypatch, keyring_stub):
     config, accounts = configured(tmp_path, alias="MyToon")
-    keyring_stub["complicated.address@example.com"] = "secret"
-    monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
+    user = accounts.usernames[0]
+    keyring_stub[user] = "secret"
     monkeypatch.setattr(
         "gttrl.cli._prompt_text",
-        lambda *args, **kwargs: pytest.fail("Saved secret should not prompt"),
+        lambda *args, **kwargs: pytest.fail("Saved password shouldn't prompt"),
     )
     auth = FakeAuth()
-    assert _authenticate(auth, accounts, config, accounts.usernames[0], None, True)
-    assert auth.attempts == [("complicated.address@example.com", "secret")]
+    assert _authenticate(auth, accounts, config, user, None, True)
+    assert auth.attempts == [(user, "secret")]
 
 
-def test_never_policy_neither_reads_nor_saves_keyring(tmp_path, monkeypatch):
-    config, accounts = configured(tmp_path, policy="never")
+def test_unsaved_password_always_prompts_and_never_uses_keyring(tmp_path, monkeypatch):
+    config, accounts = configured(tmp_path, save=False)
     monkeypatch.setattr(
         accounts, "keyring_password",
-        lambda username: pytest.fail("Never must not read the keyring"),
+        lambda username: pytest.fail("Keyring must not be read when disabled"),
     )
     monkeypatch.setattr("gttrl.cli._prompt_text", lambda *args, **kwargs: "manual")
-    monkeypatch.setattr(
-        "gttrl.cli._select",
-        lambda *args: pytest.fail("Never should not prompt about policy on normal login"),
-    )
     auth = FakeAuth()
     assert _authenticate(auth, accounts, config, accounts.usernames[0], None, True)
     assert auth.attempts[0][1] == "manual"
-    assert accounts.account(accounts.usernames[0])["save_password"] == "never"
+    assert accounts.account(accounts.usernames[0])["save_password"] is False
 
 
-def test_ask_policy_explicitly_asks_what_to_do(tmp_path, monkeypatch):
-    config, accounts = configured(tmp_path, policy="ask")
-    prompts = []
-    monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
-    monkeypatch.setattr("gttrl.cli._prompt_text", lambda *args, **kwargs: "manual")
-
-    def choose(message, options):
-        prompts.append((message, [value for _, value in options]))
-        return "manual" if message.startswith("How should") else "ask"
-
-    monkeypatch.setattr("gttrl.cli._select", choose)
-    auth = FakeAuth()
-    assert _authenticate(auth, accounts, config, accounts.usernames[0], None, True)
-    assert auth.attempts[0][1] == "manual"
-    assert prompts[0][1] == ["keyring", "manual", "skip"]
-    assert prompts[1][1] == ["yes", "ask", "never"]
-    assert accounts.account(accounts.usernames[0])["save_password"] == "ask"
-
-
-def test_failed_yes_keyring_falls_back_to_password_then_new_policy(
+def test_missing_keyring_password_prompt_and_save_after_success(
     tmp_path, monkeypatch, keyring_stub
 ):
-    config, accounts = configured(tmp_path, policy="yes")
-    keyring_stub.clear()
+    config, accounts = configured(tmp_path)
+    user = accounts.usernames[0]
     monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
-    monkeypatch.setattr("gttrl.cli._prompt_text", lambda *args, **kwargs: "new-secret")
-    monkeypatch.setattr("gttrl.cli._select", lambda *args: "never")
+    prompts = []
+
+    def prompt(message, **kwargs):
+        prompts.append(message)
+        return "new-password"
+
+    monkeypatch.setattr("gttrl.cli._prompt_text", prompt)
     auth = FakeAuth()
-    assert _authenticate(auth, accounts, config, accounts.usernames[0], None, True)
-    assert auth.attempts[0][1] == "new-secret"
-    assert accounts.account(accounts.usernames[0])["save_password"] == "never"
+    assert _authenticate(auth, accounts, config, user, None, True)
+    assert auth.attempts == [(user, "new-password")]
+    assert keyring_stub[user] == "new-password"
+    assert len(prompts) == 1
+    auth = FakeAuth()
+    monkeypatch.setattr(
+        "gttrl.cli._prompt_text",
+        lambda *args, **kwargs: pytest.fail("Now saved: do not prompt again"),
+    )
+    assert _authenticate(auth, accounts, config, user, None, True)
+    assert auth.attempts == [(user, "new-password")]
+
+
+def test_invalid_password_does_not_overwrite_keyring(
+    tmp_path, monkeypatch, keyring_stub
+):
+    config, accounts = configured(tmp_path)
+    user = accounts.usernames[0]
+    monkeypatch.setattr("gttrl.cli._interactive", lambda: False)
+    with pytest.raises(CredentialError):
+        _authenticate(FakeAuth(), accounts, config, user, None, True)
     assert not keyring_stub
 
 
-def test_rejected_yes_keyring_prompts_retry_and_updates_saved_secret(
+def test_rejected_keyring_password_replaced_after_success(
     tmp_path, monkeypatch, keyring_stub
 ):
-    config, accounts = configured(tmp_path, policy="yes")
+    config, accounts = configured(tmp_path)
     user = accounts.usernames[0]
-    keyring_stub[user] = "old-secret"
+    keyring_stub[user] = "old-password"
     monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
-    monkeypatch.setattr("gttrl.cli._prompt_text", lambda *args, **kwargs: "replacement")
-    options = iter(["retry", "yes"])
-    monkeypatch.setattr("gttrl.cli._select", lambda *args: next(options))
-    auth = FakeAuth(rejected_password="old-secret")
+    monkeypatch.setattr("gttrl.cli._select", lambda *args: "retry")
+    monkeypatch.setattr("gttrl.cli._prompt_text", lambda *args, **kwargs: "new-password")
+    auth = FakeAuth(rejected_password="old-password")
     assert _authenticate(auth, accounts, config, user, None, True)
-    assert auth.attempts == [(user, "old-secret"), (user, "replacement")]
-    assert keyring_stub[user] == "replacement"
+    assert auth.attempts == [(user, "old-password"), (user, "new-password")]
+    assert keyring_stub[user] == "new-password"
 
 
-def test_aliases_resolve_and_remain_clear_of_secrets(tmp_path, keyring_stub):
+def test_aliases_are_identifiers_and_secret_free(tmp_path, keyring_stub):
     config, accounts = configured(tmp_path, alias="RedToon")
     user = accounts.usernames[0]
     assert accounts.resolve("RedToon") == user
-    assert accounts.label(user) == f"RedToon ({user})"
     accounts.set_alias("RedToon", "PurpleToon")
     assert accounts.resolve("PurpleToon") == user
-    accounts.set_auto_login(["PurpleToon"])
-    assert accounts.auto_login_accounts == [user]
+    accounts.set_auto_launch(["PurpleToon"])
+    assert accounts.auto_launch_accounts == [user]
     assert "PurpleToon" in config.path.read_text()
     assert '"password":' not in config.path.read_text()
 
 
-def test_alias_command_and_password_policy_command(
+def test_disable_password_saving_removes_keyring_and_requires_password_next_time(
     tmp_path, monkeypatch, keyring_stub
 ):
-    config, accounts = configured(tmp_path, policy="yes")
+    config, accounts = configured(tmp_path)
     user = accounts.usernames[0]
-    keyring_stub[user] = "secret"
-    runner = CliRunner()
-    alias = runner.invoke(
-        main, ["accounts", "--config-path", str(config.path), "alias", user, "RedToon"]
+    keyring_stub[user] = "old"
+    result = CliRunner().invoke(
+        main, ["accounts", "--config-path", str(config.path), "save-password", user, "disable"]
     )
-    assert alias.exit_code == 0, alias.output
-    assert Accounts(Config(config.path)).resolve("RedToon") == user
-    policy = runner.invoke(
-        main, [
-            "accounts", "--config-path", str(config.path),
-            "save-password", "RedToon", "never",
-        ]
-    )
-    assert policy.exit_code == 0, policy.output
+    assert result.exit_code == 0, result.output
     assert user not in keyring_stub
-    assert Accounts(Config(config.path)).account(user)["save_password"] == "never"
-    cleared = runner.invoke(
-        main, ["accounts", "--config-path", str(config.path), "alias", user, "--clear"]
-    )
-    assert cleared.exit_code == 0, cleared.output
-    assert Accounts(Config(config.path)).account(user)["alias"] is None
+    config = Config(config.path)
+    accounts = Accounts(config)
+    assert accounts.account(user)["save_password"] is False
+    monkeypatch.setattr("gttrl.cli._prompt_text", lambda *args, **kwargs: "manual")
+    auth = FakeAuth()
+    assert _authenticate(auth, accounts, config, user, None, True)
+    assert auth.attempts[0][1] == "manual"
 
 
-def test_add_without_keyring_if_never(tmp_path, monkeypatch):
+def test_add_without_keyring_when_not_saving_password(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "gttrl.credentials.keyring.get_keyring",
-        lambda: pytest.fail("Never-save must not ask for keyring"),
+        lambda: pytest.fail("No keyring needed"),
     )
-    config = Config(tmp_path / "config.json")
-    accounts = Accounts(config)
-    accounts.add("bob", "unsaved", save_password="never", auto_login=True)
-    assert accounts.account("bob")["save_password"] == "never"
-    assert accounts.auto_login_accounts == ["bob"]
-    assert "unsaved" not in config.path.read_text()
+    accounts = Accounts(Config(tmp_path / "config.json"))
+    accounts.add("bob", "unsaved", save_password=False, auto_launch=True)
+    assert accounts.auto_launch_accounts == ["bob"]
+    assert "unsaved" not in accounts.config.path.read_text()
     accounts.remove("bob")
     assert accounts.usernames == []
 
 
-def test_duplicate_aliases_cannot_be_registered(tmp_path, keyring_stub):
+def test_unique_alias_validation(tmp_path, keyring_stub):
     _config, accounts = configured(tmp_path, alias="Friendly")
     with pytest.raises(CredentialError):
         accounts.resolve("Unknown")

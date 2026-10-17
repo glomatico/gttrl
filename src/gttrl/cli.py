@@ -15,7 +15,7 @@ import questionary
 
 from . import __version__, ui
 from .auth import AuthClient, LoginRejected
-from .config import DEFAULTS, PASSWORD_POLICIES, Config
+from .config import DEFAULTS, Config
 from .credentials import Accounts, CredentialError
 from .launcher import Launcher
 from .models import LoginResponse
@@ -70,16 +70,20 @@ def _select(message: str, choices: list[tuple[str, str]]) -> str:
     return result
 
 
+def _yes_no(message: str) -> bool:
+    return _select(message, [("Yes", "yes"), ("No", "no")]) == "yes"
+
+
 def _select_auto_accounts(saved: Accounts) -> list[str]:
     if not saved.usernames:
-        raise click.ClickException("Add a saved account before configuring automatic login")
+        raise click.ClickException("Add a saved account before configuring auto-launch")
     if not _interactive():
         raise click.ClickException(
-            "Interactive selection requires a terminal; use 'gttrl accounts auto-login set USERNAME ...'"
+            "Interactive selection requires a terminal; use 'gttrl accounts auto-launch set USERNAME ...'"
         )
-    selected = set(saved.auto_login_accounts)
+    selected = set(saved.auto_launch_accounts)
     result = questionary.checkbox(
-        "Select accounts to launch automatically (space to toggle):",
+        "Select accounts to auto-launch (space to toggle):",
         choices=[
             questionary.Choice(saved.label(username), value=username, checked=username in selected)
             for username in saved.usernames
@@ -98,35 +102,18 @@ def _session_value(value: str | None, label: str, *, secret: bool = False) -> st
     return value
 
 
-def _new_account_choices() -> list[tuple[str, str]]:
-    """Actions for storing another account when one is already remembered."""
-    return [
-        ("Exclusive auto-login (replace selected accounts)", "exclusive"),
-        ("Add to auto-login (launch alongside existing accounts)", "add"),
-        ("Just add (do not change auto-login)", "save"),
-    ]
-
-
 def _save_account(
-    accounts: Accounts, username: str, password: str, choice: str,
-    *, save_password: str = "yes", alias: str | None = None,
+    accounts: Accounts, username: str, password: str, *,
+    auto_launch: bool = False, save_password: bool = False,
+    alias: str | None = None,
 ) -> None:
     accounts.add(
         username,
         password,
-        auto_login=choice in {"auto", "exclusive", "add"},
-        exclusive_auto_login=choice == "exclusive",
+        auto_launch=auto_launch,
         save_password=save_password,
         alias=alias,
     )
-
-
-def _password_policy_choice(message: str = "Remember the password?") -> str:
-    return _select(message, [
-        ("Yes — use the OS keyring next time", "yes"),
-        ("Ask — let me choose how to log in each time", "ask"),
-        ("Never — always prompt for a password", "never"),
-    ])
 
 
 def _ask_save(config: Config, accounts: Accounts, username: str, password: str) -> None:
@@ -134,35 +121,22 @@ def _ask_save(config: Config, accounts: Accounts, username: str, password: str) 
         return
     if username in accounts.usernames:
         return
-    save_options = (
-        _new_account_choices()
-        if accounts.usernames
-        else [
-            ("Save and enable automatic login", "auto"),
-            ("Save, but ask which account to use each time", "save"),
-        ]
-    )
-    choice = _select(
-        "Remember this account?",
-        save_options + [
-            ("Don't save", "no"),
-            ("Disable the account setup wizard", "never"),
-        ],
-    )
-    if choice == "never":
-        config.set("account_wizard", False)
-    elif choice in {"auto", "save", "exclusive", "add"}:
-        try:
-            alias = _prompt_optional_alias()
-            policy = _password_policy_choice()
-            _save_account(
-                accounts, username, password, choice,
-                save_password=policy, alias=alias,
-            )
-        except CredentialError as error:
-            ui.error(f"Couldn't remember account: {error.format_message()}")
-        else:
-            ui.success("Account securely saved to your OS keyring.")
+    if not _yes_no("Remember this account?"):
+        return
+    alias = _prompt_optional_alias()
+    auto_launch = _yes_no("Enable auto-launch?")
+    save_password = _yes_no("Remember the password?")
+    try:
+        _save_account(
+            accounts, username, password,
+            auto_launch=auto_launch, save_password=save_password, alias=alias,
+        )
+    except CredentialError as error:
+        ui.error(f"Couldn't remember account: {error.format_message()}")
+    else:
+        ui.success("Account remembered." + (
+            " Password saved to the OS keyring." if save_password else ""
+        ))
 
 
 def _prompt_optional_alias() -> str | None:
@@ -220,10 +194,10 @@ def _selected_credentials(
         return [(name, None, True) for name in resolved]
     explicit = bool(account or username is not None or password is not None or
                     choose_account or no_saved_login)
-    if not explicit and not config.disabled and accounts.auto_login_accounts:
+    if not explicit and not config.disabled and accounts.auto_launch_accounts:
         return [
             (user, None, True)
-            for user in accounts.auto_login_accounts
+            for user in accounts.auto_launch_accounts
         ]
     if not config.get("account_wizard") and not accounts.usernames and not explicit:
         raise click.UsageError(
@@ -246,27 +220,13 @@ def _authenticate(
     password: str | None,
     was_saved: bool,
 ):
-    """Respect account password policy and recover rejected keyring credentials."""
-    policy = accounts.account(username)["save_password"] if was_saved else None
-    prompted_for_password = False
+    """Use remembered passwords when enabled; repair missing/rejected secrets."""
+    remember_password = accounts.account(username)["save_password"] if was_saved else False
+    should_store = False
     if password is None and was_saved:
-        if policy == "never":
+        if not remember_password:
             password = _prompt_text(f"Password for {accounts.label(username)}", password=True)
-        elif policy == "ask":
-            choice = _select(
-                f"How should GTTRL log in as {accounts.label(username)}?",
-                [
-                    ("Use a password from the OS keyring", "keyring"),
-                    ("Enter the password", "manual"),
-                    ("Skip this account", "skip"),
-                ],
-            )
-            if choice == "skip":
-                return None
-            if choice == "manual":
-                password = _prompt_text("Password", password=True)
-                prompted_for_password = True
-        if password is None:
+        else:
             try:
                 password = accounts.keyring_password(username)
             except CredentialError as error:
@@ -274,7 +234,7 @@ def _authenticate(
                     raise
                 ui.warning(f"Couldn't retrieve password for {username}: {error.format_message()}")
                 password = _prompt_text("Password", password=True)
-                prompted_for_password = True
+                should_store = True
     if password is None:
         password = _prompt_text("Password", password=True)
 
@@ -304,22 +264,16 @@ def _authenticate(
             if action == "cancel":
                 raise click.Abort() from error
             password = _prompt_text("New password", password=True)
-            prompted_for_password = True
+            should_store = remember_password
         else:
             ui.success(f"Successfully authenticated as {username}.")
-            if was_saved and prompted_for_password and policy in {"yes", "ask"} and _interactive():
-                choice = _password_policy_choice(
-                    "How should GTTRL handle this account's password in the future?"
-                )
+            if was_saved and should_store:
                 try:
-                    accounts.set_password_policy(
-                        username, choice,
-                        password=password if choice == "yes" else None,
-                    )
+                    accounts.update_password(username, password)
                 except CredentialError as error:
-                    ui.error(f"Couldn't update the password preference: {error.format_message()}")
+                    ui.warning(f"Couldn't save the recovered password: {error.format_message()}")
                 else:
-                    ui.success("Password preference updated.")
+                    ui.success("Recovered password saved to the OS keyring.")
             if not was_saved and config.get("account_wizard"):
                 _ask_save(config, accounts, username, password)
             return response
@@ -537,7 +491,7 @@ def _edit_account_password(saved: Accounts, username: str) -> None:
     """Verify a replacement before explicitly overwriting the keyring."""
     warning = (
         f"Editing the password for {saved.label(username)} will overwrite/save "
-        "its secret in the operating system keyring and enable save_password=yes."
+        "its secret in the operating system keyring and enable save_password=true."
     )
     ui.warning(warning)
     if _select("Proceed?", [("Yes, replace keyring password", "yes"), ("Cancel", "no")]) != "yes":
@@ -549,7 +503,7 @@ def _edit_account_password(saved: Accounts, username: str) -> None:
             prompt_token=lambda msg: _prompt_text(msg, password=True),
             display=ui.info,
         )
-    saved.set_password_policy(username, "yes", password=password)
+    saved.set_password_saving(username, True, password=password)
     ui.success("Verified password saved to the OS keyring.")
 
 
@@ -572,9 +526,9 @@ def _account_manager(saved: Accounts) -> None:
                 f"Manage {saved.label(username)}:",
                 [
                     ("Edit password (overwrite/save OS keyring)", "password"),
-                    (f"Change save password behavior ({record['save_password']})", "policy"),
+                    (f"Edit password saving ({'enabled' if record['save_password'] else 'disabled'})", "policy"),
                     ("Edit alias", "alias"),
-                    (f"Auto-login: {'on' if record['auto_login'] else 'off'}", "auto"),
+                    (f"Edit auto-launch ({'enabled' if record['auto_launch'] else 'disabled'})", "auto"),
                     ("Launch this account", "play"),
                     ("Remove this account", "remove"),
                     ("Back to accounts", "back"),
@@ -585,28 +539,36 @@ def _account_manager(saved: Accounts) -> None:
             if option == "password":
                 _edit_account_password(saved, username)
             elif option == "policy":
-                policy = _password_policy_choice()
-                if policy == "yes":
-                    try:
-                        saved.set_password_policy(username, "yes")
-                    except CredentialError:
-                        ui.info("No usable saved password. Set one using Edit password.")
-                        continue
-                else:
-                    saved.set_password_policy(username, policy)
-                ui.success(f"Password behavior: {policy}.")
+                action = _select(
+                    "Password saving:",
+                    [
+                        ("Enable (save/overwrite password in OS keyring)", "enable"),
+                        ("Disable (remove keyring password, ask at login)", "disable"),
+                        ("Back", "back"),
+                    ],
+                )
+                if action == "enable":
+                    _edit_account_password(saved, username)
+                elif action == "disable":
+                    saved.set_password_saving(username, False)
+                    ui.success("Password saving disabled; keyring secret removed.")
             elif option == "alias":
                 alias = _prompt_optional_alias()
                 saved.set_alias(username, alias)
                 ui.success(f"Account alias: {saved.label(username)}")
             elif option == "auto":
-                selected_accounts = saved.auto_login_accounts
-                if username in selected_accounts:
-                    selected_accounts.remove(username)
-                else:
+                action = _select(
+                    "Auto-launch:", [("Enable", "enable"), ("Disable", "disable"), ("Back", "back")]
+                )
+                if action == "back":
+                    continue
+                selected_accounts = saved.auto_launch_accounts
+                if action == "enable" and username not in selected_accounts:
                     selected_accounts.append(username)
-                saved.set_auto_login(selected_accounts)
-                ui.success("Auto-login selection updated.")
+                if action == "disable" and username in selected_accounts:
+                    selected_accounts.remove(username)
+                saved.set_auto_launch(selected_accounts)
+                ui.success("Auto-launch selection updated.")
             elif option == "play":
                 click.get_current_context().parent.invoke(
                     play, account=username, config_path=saved.config.path
@@ -627,8 +589,7 @@ def accounts_list(saved: Accounts) -> None:
     """List saved usernames without displaying secrets."""
     ui.accounts_list(
         saved.usernames,
-        auto_login=bool(saved.auto_login_accounts),
-        auto_login_accounts=saved.auto_login_accounts,
+        auto_launch_accounts=saved.auto_launch_accounts,
         aliases={
             item["username"]: item["alias"] for item in saved.records
         },
@@ -641,59 +602,47 @@ def accounts_list(saved: Accounts) -> None:
 @accounts.command("add")
 @click.option("--username", help="Username to add.")
 @click.option("--alias", help="Optional unique account alias (no spaces).")
+@click.option("--save-password/--no-save-password", default=None, help="Save the password in the OS keyring.")
+@click.option("--auto-launch/--no-auto-launch", default=None, help="Launch this account automatically.")
 @click.option(
-    "--save-password",
-    type=click.Choice(sorted(PASSWORD_POLICIES)),
-    default=None,
-    help="Password policy: yes (keyring), ask (choose each time), never (prompt).",
-)
-@click.option("--auto-login/--no-auto-login", default=None, help="Use this account automatically.")
-@click.option(
-    "--exclusive-auto-login",
+    "--exclusive-auto-launch",
     is_flag=True,
-    help="Use only this account for automatic login, replacing previous selections.",
+    help="Auto-launch only this account, replacing previous selections.",
 )
 @click.pass_obj
 def accounts_add(
     saved: Accounts,
     username: str | None,
     alias: str | None,
-    save_password: str | None,
-    auto_login: bool | None,
-    exclusive_auto_login: bool,
+    save_password: bool | None,
+    auto_launch: bool | None,
+    exclusive_auto_launch: bool,
 ) -> None:
     """Authenticate and securely remember an account."""
-    if exclusive_auto_login and auto_login is not None:
+    if exclusive_auto_launch and auto_launch is not None:
         raise click.UsageError(
-            "--exclusive-auto-login cannot be combined with --auto-login or --no-auto-login"
+            "--exclusive-auto-launch cannot be combined with --auto-launch or --no-auto-launch"
         )
     username = username or _prompt_text("Username")
-    had_other_accounts = any(user != username for user in saved.usernames)
     password = _prompt_text("Password", password=True)
     with AuthClient() as auth:
         auth.login(username, password, prompt_token=lambda msg: _prompt_text(msg, password=True))
-    if exclusive_auto_login:
-        choice = "exclusive"
-    elif auto_login is not None:
-        choice = "add" if auto_login else "save"
-    elif not _interactive():
-        choice = "save"
-    elif had_other_accounts:
-        choice = _select("How should this account be saved?", _new_account_choices())
-    else:
-        choice = _select(
-            "Enable automatic login?",
-            [("Yes", "auto"), ("No, ask each time", "save")],
-        )
-    policy = save_password or (
-        _password_policy_choice() if _interactive() else "yes"
-    )
+    if _interactive() and not _yes_no("Remember this account?"):
+        ui.info("Account used for authentication but not remembered.")
+        return
     if alias is None and _interactive():
         alias = _prompt_optional_alias()
+    if auto_launch is None:
+        auto_launch = _yes_no("Enable auto-launch?") if _interactive() else False
+    if save_password is None:
+        save_password = _yes_no("Remember the password?") if _interactive() else True
     _save_account(
-        saved, username, password, choice,
-        alias=alias, save_password=policy,
+        saved, username, password,
+        auto_launch=auto_launch or exclusive_auto_launch,
+        alias=alias, save_password=save_password,
     )
+    if exclusive_auto_launch:
+        saved.set_auto_launch([username])
     ui.success(f"Saved {username!r} securely.")
 
 
@@ -734,55 +683,45 @@ def accounts_alias(
 
 @accounts.command("save-password")
 @click.argument("username")
-@click.argument("policy", type=click.Choice(sorted(PASSWORD_POLICIES)))
+@click.argument("policy", type=click.Choice(["enable", "disable"]))
 @click.pass_obj
 def accounts_save_password(saved: Accounts, username: str, policy: str) -> None:
     """Control use of OS-keyring passwords for a saved account."""
     canonical = saved.resolve(username)
-    if policy == "yes":
-        try:
-            saved.set_password_policy(canonical, "yes")
-        except CredentialError:
-            # A password can be stored only after the user authenticates.
-            password = _prompt_text("Password", password=True)
-            with AuthClient() as auth:
-                auth.login(
-                    canonical, password,
-                    prompt_token=lambda msg: _prompt_text(msg, password=True),
-                )
-            saved.set_password_policy(canonical, "yes", password=password)
+    if policy == "enable":
+        _edit_account_password(saved, canonical)
     else:
-        saved.set_password_policy(canonical, policy)
-    ui.success(f"Password preference for {saved.label(canonical)}: {policy}.")
+        saved.set_password_saving(canonical, False)
+        ui.success(f"Password saving disabled for {saved.label(canonical)}.")
 
 
-@accounts.command("auto-login")
+@accounts.command("auto-launch")
 @click.argument("action", required=False, type=click.Choice(
     ["on", "off", "set", "list"], case_sensitive=False
 ))
 @click.argument("usernames", nargs=-1)
 @click.pass_obj
-def accounts_auto_login(saved: Accounts, action: str | None, usernames: tuple[str, ...]) -> None:
-    """Select multiple accounts for automatic login and game launching.
+def accounts_auto_launch(saved: Accounts, action: str | None, usernames: tuple[str, ...]) -> None:
+    """Select saved accounts for automatic launching.
 
     Run without arguments for an interactive checkbox selector.
-    Or use: auto-login set USER1 USER2 ...
+    Or use: auto-launch set USER1 USER2 ...
     """
     if action != "set" and usernames:
-        raise click.UsageError("Account names can only follow 'auto-login set'")
+        raise click.UsageError("Account names can only follow 'auto-launch set'")
     if action == "list":
-        if saved.auto_login_accounts:
-            for username in saved.auto_login_accounts:
+        if saved.auto_launch_accounts:
+            for username in saved.auto_launch_accounts:
                 click.echo(username)
         else:
-            click.echo("No accounts selected for automatic login.")
+            click.echo("No accounts selected for auto-launch.")
         return
     if action == "set":
         if not usernames:
-            raise click.UsageError("Specify at least one saved account or use 'auto-login off'")
+            raise click.UsageError("Specify an account or use 'auto-launch off'")
         selected = list(usernames)
     elif action == "on":
-        selected = saved.auto_login_accounts
+        selected = saved.auto_launch_accounts
         if not selected:
             if not saved.usernames:
                 raise click.ClickException("Save an account first")
@@ -791,10 +730,14 @@ def accounts_auto_login(saved: Accounts, action: str | None, usernames: tuple[st
         selected = []
     else:
         selected = _select_auto_accounts(saved)
-    saved.set_auto_login(selected)
+    saved.set_auto_launch(selected)
     ui.success(
-        f"Automatic login configured for {len(selected)} account(s)."
+        f"Auto-launch configured for {len(selected)} account(s)."
     )
+
+
+# Compatibility with the pre-release CLI spelling.
+accounts.add_command(accounts_auto_launch, name="auto-login")
 
 
 @main.group()

@@ -13,8 +13,7 @@ import click
 
 from .constants import config_path, game_dir
 
-PASSWORD_POLICIES = frozenset({"ask", "never", "yes"})
-ACCOUNT_FIELDS = frozenset({"username", "alias", "auto_login", "save_password"})
+ACCOUNT_FIELDS = frozenset({"username", "alias", "auto_launch", "save_password"})
 DEFAULTS: dict[str, Any] = {
     "game_dir_path": str(game_dir()),
     "display_game_log": False,
@@ -29,8 +28,8 @@ def _account(
     username: str,
     *,
     alias: str | None = None,
-    auto_login: bool = False,
-    save_password: str = "ask",
+    auto_launch: bool = False,
+    save_password: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(username, str) or not username.strip():
         raise click.ClickException("Account username must be a nonempty string")
@@ -41,14 +40,14 @@ def _account(
         raise click.ClickException(
             "Account alias must contain no spaces, commas or leading dashes"
         )
-    if not isinstance(auto_login, bool):
-        raise click.ClickException("Account auto_login must be a boolean")
-    if not isinstance(save_password, str) or save_password not in PASSWORD_POLICIES:
-        raise click.ClickException("Account save_password must be ask, never, or yes")
+    if not isinstance(auto_launch, bool):
+        raise click.ClickException("Account auto_launch must be a boolean")
+    if not isinstance(save_password, bool):
+        raise click.ClickException("Account save_password must be a boolean")
     return {
         "username": username,
         "alias": alias,
-        "auto_login": auto_login,
+        "auto_launch": auto_launch,
         "save_password": save_password,
     }
 
@@ -63,7 +62,7 @@ def _validate(key: str, value: Any) -> Any:
         for item in value:
             if not isinstance(item, dict) or set(item) != ACCOUNT_FIELDS:
                 raise click.ClickException(
-                    "Each account must contain username, alias, auto_login, "
+                    "Each account must contain username, alias, auto_launch, "
                     "and save_password (no secrets)"
                 )
             accounts.append(_account(**item))
@@ -127,7 +126,7 @@ class Config:
                 enabled = [default] if loaded.get("auto_login") and default else []
             self.data["accounts"] = _validate(
                 "accounts",
-                [_account(value, auto_login=value in enabled, save_password="yes") for value in items],
+                [_account(value, auto_launch=value in enabled, save_password=True) for value in items],
             )
         else:
             converted = []
@@ -145,6 +144,15 @@ class Config:
                         )
                         for key, value in item.items()
                     }
+                if isinstance(item, dict):
+                    item = dict(item)
+                    if "auto_login" in item and "auto_launch" not in item:
+                        item["auto_launch"] = item.pop("auto_login")
+                    # Pre-release policies were ask, never or yes. Only yes
+                    # requested automatic retrieval from the OS keyring.
+                    policy = item.get("save_password")
+                    if isinstance(policy, str) and policy in {"ask", "never", "yes"}:
+                        item["save_password"] = policy == "yes"
                 converted.append(item)
             self.data["accounts"] = _validate("accounts", converted)
 

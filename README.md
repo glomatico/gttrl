@@ -11,7 +11,7 @@ and download progress use Rich. Machine-readable output remains plain text.
 
 - **Multi-toon / multi-login:** select several remembered accounts and start a separate
   Toontown Rewritten instance for each with a single `gttrl` command.
-- **Secure account management:** per-account CLI aliases, auto-login preferences,
+- **Secure account management:** per-account CLI aliases, auto-launch preferences,
   and password policies. Passwords are stored in the system keyring only when
   the account is configured to use it.
 - **Multiple authentication methods:** username/password, saved accounts, or a
@@ -56,18 +56,17 @@ gttrl play --no-saved-login
 gttrl play --no-account-wizard        # Override config for this run
 ```
 
-With no account remembered, GTTRL prompts for your username and password. After successful authentication, it offers to:
+With no account remembered, GTTRL prompts for a username and password.
+After a successful login, the setup wizard asks:
 
-1. **Save and enable automatic login:** register the account and add it to the accounts started automatically.
-2. **Save but ask each time:** register the account, but display an account picker when you run `gttrl`.
-3. **Don't save:** use your credentials for this launch only.
-4. **Disable the account setup wizard:** don't save and disable future account setup prompts.
+1. **Remember this account?** Yes / No. Choosing No skips all remaining questions and doesn't store anything.
+2. **Account alias?** Optional, with no spaces.
+3. **Enable auto-launch?** Yes / No. Automatically selects this account for launching, independently of its password.
+4. **Remember the password?** Yes / No. Yes stores the password securely in the OS keyring.
 
-When registering an account, GTTRL separately asks for its password policy
-(`yes`, `ask` or `never`). Auto-login selects **which accounts** to launch,
-whereas the password policy determines **how they authenticate**.
-With auto-login enabled, you may still be prompted for a password or for
-2FA/ToonGuard, depending on the account's policy and TTR's requirements.
+Auto-launch and password saving are independent: with auto-launch enabled but
+password saving disabled, GTTRL selects the account and still asks for its
+password. TTR may also require 2FA/ToonGuard.
 
 The global `account_wizard` preference controls only the account setup flow.
 When disabled, use `gttrl --username USER --password-stdin` for manual
@@ -84,32 +83,30 @@ gttrl config set account-wizard true
 
 ```sh
 gttrl accounts add
-gttrl accounts add --username myuser --auto-login
+gttrl accounts add --username myuser --auto-launch
 gttrl accounts                          # Interactive account manager
-gttrl accounts add --username user@example.com --alias toon1 --save-password ask
+gttrl accounts add --username user@example.com --alias toon1 --no-save-password
 gttrl accounts list
 gttrl accounts alias myuser toon1
 gttrl accounts alias myuser --clear
-gttrl accounts save-password myuser yes
-gttrl accounts save-password myuser ask
-gttrl accounts save-password myuser never
-gttrl accounts auto-login on
-gttrl accounts auto-login off
+gttrl accounts save-password myuser enable
+gttrl accounts save-password myuser disable
+gttrl accounts auto-launch on
+gttrl accounts auto-launch off
 gttrl accounts remove myuser
 gttrl accounts clear
 ```
 
-`accounts add` validates the account with TTR before registering it. The
-`save_password` preference controls the login experience:
+`accounts add` validates credentials with TTR before registering the account.
+`save_password` is a boolean:
 
-- **`yes`:** use the OS keyring. If no secret is available, or the saved login
-  is rejected, GTTRL asks for a password. Following a successful recovery,
-  it offers `yes`, `ask` or `never` for subsequent logins.
-- **`ask`:** each time the account is used, choose whether to attempt a
-  saved keyring password or enter it manually. After manually entering one,
-  choose whether to keep `ask`, switch to `never`, or store it with `yes`.
-- **`never`:** always ask for a password; do not read or store one in the
-  keyring. An existing saved secret is deleted when switching to `never`.
+- **`true`:** use the OS keyring. If the secret is missing, GTTRL prompts for
+  a password; after successful authentication it saves the password in the
+  keyring, so subsequent launches don't ask again. Rejected saved passwords
+  can also be replaced after a successful retry.
+- **`false`:** always ask for a password without retrieving it from the
+  keyring. Disabling password saving through the account manager deletes the
+  existing keyring secret.
 
 Passwords are stored via [keyring](https://pypi.org/project/keyring/) **only
 when enabled**, not in the JSON file. Aliases are optional, unique,
@@ -120,8 +117,9 @@ No insecure plaintext password fallback is used.
 
 Running `gttrl accounts` without a subcommand opens an interactive editor:
 choose a saved account to edit its password, password-saving behavior, alias,
-auto-login selection, or remove it. Editing a password warns that it will
+auto-launch selection, or remove it. Editing a password warns that it will
 overwrite/save the keyring secret and verifies authentication before doing so.
+Auto-launch and password-saving menus offer **Enable / Disable / Back**.
 The manager is available even when `account_wizard` is disabled.
 
 ### Multi-toon / multi-login
@@ -131,39 +129,35 @@ should log in when running `gttrl`:
 
 ```sh
 gttrl accounts add                        # Add your additional TTR accounts
-gttrl accounts add --exclusive-auto-login # Save and auto-launch only this account
-gttrl accounts add --auto-login           # Add a saved account to auto-launch
-gttrl accounts add --no-auto-login        # Save without changing auto-launch
-gttrl accounts auto-login                 # Interactive multi-select menu
-gttrl accounts auto-login set alice bob   # Non-interactive selection
-gttrl accounts auto-login list            # Show selected usernames
-gttrl accounts auto-login off             # Disable automatic login
-gttrl accounts auto-login on              # Enable first saved account if none selected
+gttrl accounts add --exclusive-auto-launch # Auto-launch only this account
+gttrl accounts add --auto-launch           # Add account to auto-launch
+gttrl accounts add --no-auto-launch        # Save without auto-launching
+gttrl accounts auto-launch                 # Interactive multi-select menu
+gttrl accounts auto-launch set alice bob   # Non-interactive selection
+gttrl accounts auto-launch list            # Show selected usernames
+gttrl accounts auto-launch off             # Disable auto-launch
+gttrl accounts auto-launch on              # Enable first saved account if none selected
 gttrl                                     # Start one game instance per selected account
 ```
 
 Existing configurations with string usernames and global auto-login fields
 are migrated in memory and written using the new account format on the next
-configuration change; their previously keyring-backed accounts receive
-`save_password: "yes"`.
-Adding other accounts does not disable or replace existing auto-login selections.
-When adding another account interactively, GTTRL offers **Exclusive auto-login**
-(replace the selected accounts with the new account), **Add to auto-login**
-(launch it alongside those already selected), and **Just add** (keep the
-existing selection unchanged). When saving a newly logged-in account, these
-same options appear alongside **Don't save** and **Never ask again**.
+configuration change. Old `auto_login` preferences migrate to `auto_launch`;
+old `save_password: "yes"` becomes `true`, and `"ask"`/`"never"` become
+`false`. Previously saved passwords are not rewritten during migration.
+Adding accounts does not disable existing auto-launch selections.
 Use `gttrl play --account alice` to explicitly launch **one** account even
 when multi-login is enabled. `gttrl play --choose-account` forces the single-account
 picker. Each selected account gets its own authenticated session and game
 process; the shared game installation is checked and updated **only once**.
-If no accounts are selected for auto-login, `gttrl` shows the account picker.
-The `--accounts` option overrides every saved auto-login selection for that run.
+If no accounts are selected for auto-launch, `gttrl` shows the account picker.
+The `--accounts` option overrides every saved auto-launch selection for that run.
 When `--display-game-log` is enabled, output from multiple processes may interleave.
 
 If a saved login is rejected by TTR, interactive sessions offer to re-enter the
-password, skip that account, or cancel. Once reauthentication succeeds, you
-can replace its stored password. Network failures are not treated as invalid
-passwords.
+password, skip that account, or cancel. A successfully reauthenticated account
+with password saving enabled automatically updates its keyring entry.
+Network failures are not treated as invalid passwords.
 
 ### Manual, external, and scripted login
 
@@ -218,14 +212,14 @@ The account records in `~/.gttrl/config.json` now look like this:
     {
       "username": "complicated.email@example.com",
       "alias": "toon1",
-      "auto_login": true,
-      "save_password": "yes"
+      "auto_launch": true,
+      "save_password": true
     },
     {
       "username": "second-account",
       "alias": null,
-      "auto_login": true,
-      "save_password": "never"
+      "auto_launch": true,
+      "save_password": false
     }
   ]
 }

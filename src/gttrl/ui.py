@@ -49,8 +49,7 @@ def error(text: str) -> None:
 def accounts_list(
     usernames: Sequence[str],
     *,
-    auto_login: bool,
-    auto_login_accounts: Sequence[str] = (),
+    auto_launch_accounts: Sequence[str] = (),
     aliases: Mapping[str, str | None] | None = None,
     password_policies: Mapping[str, str] | None = None,
 ) -> None:
@@ -66,15 +65,15 @@ def accounts_list(
     elif terminal:
         table = Table(title="Saved Accounts", header_style="bold cyan")
         table.add_column("Account")
-        table.add_column("Auto-login", justify="center")
-        table.add_column("Password")
+        table.add_column("Auto-launch", justify="center")
+        table.add_column("Save password")
         for username in usernames:
             alias = aliases.get(username)
             title = f"{alias} ({username})" if alias else username
             table.add_row(
                 Text(title),
-                "✓" if username in auto_login_accounts else "",
-                password_policies.get(username, ""),
+                "✓" if username in auto_launch_accounts else "",
+                "yes" if password_policies.get(username, False) else "no",
             )
         console().print(table)
     else:
@@ -82,10 +81,10 @@ def accounts_list(
             alias = aliases.get(username)
             display = f"{alias} ({username})" if alias else username
             label = ""
-            if username in auto_login_accounts:
-                label += " (auto-login)"
+            if username in auto_launch_accounts:
+                label += " (auto-launch)"
             click.echo(f"{display}{label}")
-    summary = f"Auto-login: {'on' if auto_login else 'off'}"
+    summary = f"Auto-launch: {'on' if auto_launch_accounts else 'off'}"
     if terminal:
         info(summary)
     else:

@@ -14,8 +14,8 @@ from gttrl.models import LoginResponse
 def setup_accounts(path):
     settings = Config(path)
     settings.set("accounts", [
-        _account("alice@example.com", alias="toon1", auto_login=True, save_password="yes"),
-        _account("bob@example.com", alias="toon2", auto_login=True, save_password="yes"),
+        _account("alice@example.com", alias="toon1", auto_launch=True, save_password=True),
+        _account("bob@example.com", alias="toon2", auto_launch=True, save_password=True),
     ])
     return settings
 
@@ -151,12 +151,9 @@ def test_explicit_wizard_flag_overrides_config_without_persisting(
     fake_launch(monkeypatch)
     choices = []
     monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
-    monkeypatch.setattr(
-        "gttrl.cli._select",
-        lambda message, options: choices.append(message) or (
-            "save" if message == "Remember this account?" else "never"
-        ),
-    )
+    monkeypatch.setattr("gttrl.cli._yes_no", lambda message: (
+        choices.append(message) or message == "Remember this account?"
+    ))
     monkeypatch.setattr("gttrl.cli._prompt_optional_alias", lambda: "toon1")
     monkeypatch.setattr("gttrl.credentials.Accounts._check_backend", lambda *args: None)
     result = CliRunner().invoke(main, [
@@ -175,7 +172,7 @@ def test_account_manager_alias_and_auto_login_from_bare_accounts(
 ):
     settings = setup_accounts(tmp_path / "config.json")
     settings.set("account_wizard", False)
-    selections = iter(["alice@example.com", "alias", "auto", "back", "__exit__"])
+    selections = iter(["alice@example.com", "alias", "auto", "disable", "back", "__exit__"])
     monkeypatch.setattr("gttrl.cli._select", lambda *args: next(selections))
     monkeypatch.setattr("gttrl.cli._prompt_optional_alias", lambda: "renamed")
     result = CliRunner().invoke(main, [
@@ -184,24 +181,24 @@ def test_account_manager_alias_and_auto_login_from_bare_accounts(
     assert result.exit_code == 0, (result.output, result.exception)
     accounts = Accounts(Config(settings.path))
     assert accounts.resolve("renamed") == "alice@example.com"
-    assert accounts.auto_login_accounts == ["bob@example.com"]
+    assert accounts.auto_launch_accounts == ["bob@example.com"]
 
 
 def test_account_manager_add_choice_runs_account_setup(tmp_path, monkeypatch):
     path = tmp_path / "config.json"
     Config(path).set("account_wizard", False)
     fake_launch(monkeypatch)
-    choices = iter(["__add__", "auto", "__exit__"])
+    choices = iter(["__add__", "__exit__"])
     monkeypatch.setattr("gttrl.cli._select", lambda *args: next(choices))
     monkeypatch.setattr("gttrl.cli._prompt_text", lambda *args, **kwargs: "pw")
     monkeypatch.setattr("gttrl.cli._prompt_optional_alias", lambda: "toon1")
-    monkeypatch.setattr("gttrl.cli._password_policy_choice", lambda *args: "never")
+    monkeypatch.setattr("gttrl.cli._yes_no", lambda *args: False)
     monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
     result = CliRunner().invoke(main, [
         "accounts", "--config-path", str(path)
     ])
     assert result.exit_code == 0, (result.output, result.exception)
-    assert Accounts(Config(path)).resolve("toon1") == "pw"
+    assert Accounts(Config(path)).usernames == []
 
 
 def test_account_manager_edit_password_warns_and_replaces_keyring(
@@ -234,7 +231,66 @@ def test_account_manager_edit_password_warns_and_replaces_keyring(
     assert result.exit_code == 0, (result.output, result.exception)
     assert "overwrite/save" in result.output
     assert saved == [("alice@example.com", "newsecret")]
-    assert Accounts(Config(settings.path)).account("toon1")["save_password"] == "yes"
+    assert Accounts(Config(settings.path)).account("toon1")["save_password"] is True
+
+
+def test_manager_disable_password_saving_and_back(tmp_path, monkeypatch):
+    settings = setup_accounts(tmp_path / "config.json")
+    deleted = []
+    monkeypatch.setattr("gttrl.credentials.Accounts._check_backend", lambda *args: None)
+    monkeypatch.setattr(
+        "gttrl.credentials.keyring.delete_password",
+        lambda service, username: deleted.append(username),
+    )
+    selections = iter([
+        "alice@example.com", "policy", "back", "policy", "disable",
+        "auto", "back", "back", "__exit__",
+    ])
+    monkeypatch.setattr("gttrl.cli._select", lambda *args: next(selections))
+    result = CliRunner().invoke(main, ["accounts", "--config-path", str(settings.path)])
+    assert result.exit_code == 0, (result.output, result.exception)
+    records = Accounts(Config(settings.path))
+    assert records.account("toon1")["save_password"] is False
+    assert records.account("toon1")["auto_launch"] is True
+    assert deleted == ["alice@example.com"]
+
+
+def test_manager_enabling_password_saving_verifies_then_writes(
+    tmp_path, monkeypatch
+):
+    settings = setup_accounts(tmp_path / "config.json")
+    records = settings.get("accounts")
+    records[0]["save_password"] = False
+    settings.set("accounts", records)
+    saved = []
+    monkeypatch.setattr("gttrl.credentials.Accounts._check_backend", lambda *args: None)
+    monkeypatch.setattr(
+        "gttrl.credentials.keyring.set_password",
+        lambda service, username, password: saved.append((username, password)),
+    )
+    monkeypatch.setattr("gttrl.cli._prompt_text", lambda *args, **kwargs: "newpass")
+    selections = iter([
+        "alice@example.com", "policy", "enable", "yes", "back", "__exit__"
+    ])
+    monkeypatch.setattr("gttrl.cli._select", lambda *args: next(selections))
+
+    class FakeAuth:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def login(self, username, password, **kwargs):
+            assert username == "alice@example.com"
+            assert password == "newpass"
+            return LoginResponse("cookie", "host")
+
+    monkeypatch.setattr("gttrl.cli.AuthClient", FakeAuth)
+    result = CliRunner().invoke(main, ["accounts", "--config-path", str(settings.path)])
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert Accounts(Config(settings.path)).account("toon1")["save_password"] is True
+    assert saved == [("alice@example.com", "newpass")]
 
 
 def test_first_account_add_prompts_for_alias(tmp_path, monkeypatch):
@@ -243,13 +299,14 @@ def test_first_account_add_prompts_for_alias(tmp_path, monkeypatch):
     monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
     monkeypatch.setattr("gttrl.cli._prompt_text", lambda *args, **kwargs: "pw")
     monkeypatch.setattr("gttrl.cli._prompt_optional_alias", lambda: "toon1")
-    monkeypatch.setattr("gttrl.cli._select", lambda *args: "auto")
-    monkeypatch.setattr("gttrl.cli._password_policy_choice", lambda *args: "never")
+    monkeypatch.setattr("gttrl.cli._yes_no", lambda question: question != "Remember the password?")
     result = CliRunner().invoke(main, [
         "accounts", "--config-path", str(path), "add", "--username", "alice@example.com"
     ])
     assert result.exit_code == 0, (result.output, result.exception)
     assert Accounts(Config(path)).account("toon1")["alias"] == "toon1"
+    assert Accounts(Config(path)).account("toon1")["auto_launch"] is True
+    assert Accounts(Config(path)).account("toon1")["save_password"] is False
 
 
 def test_migrate_old_nickname_and_globals(tmp_path):
@@ -275,3 +332,5 @@ def test_migrate_old_nickname_and_globals(tmp_path):
     assert "save_prompt" not in updated
     assert "nickname" not in json.dumps(updated)
     assert updated["accounts"][0]["alias"] == "Red_Toon"
+    assert updated["accounts"][0]["auto_launch"] is True
+    assert updated["accounts"][0]["save_password"] is True

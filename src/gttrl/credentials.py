@@ -6,7 +6,7 @@ import click
 import keyring
 from keyring import errors
 
-from .config import PASSWORD_POLICIES, Config, _account
+from .config import Config, _account
 
 SERVICE = "gttrl"
 
@@ -28,8 +28,8 @@ class Accounts:
         return [record["username"] for record in self.records]
 
     @property
-    def auto_login_accounts(self) -> list[str]:
-        return [record["username"] for record in self.records if record["auto_login"]]
+    def auto_launch_accounts(self) -> list[str]:
+        return [record["username"] for record in self.records if record["auto_launch"]]
 
     def resolve(self, identifier: str) -> str:
         for record in self.records:
@@ -46,13 +46,13 @@ class Accounts:
         alias = record["alias"]
         return f"{alias} ({record['username']})" if alias else record["username"]
 
-    def set_auto_login(self, usernames: list[str]) -> None:
+    def set_auto_launch(self, usernames: list[str]) -> None:
         selected = [self.resolve(username) for username in usernames]
         if len(selected) != len(set(selected)):
-            raise CredentialError("Automatic login accounts must be unique")
+            raise CredentialError("Automatic launch accounts must be unique")
         records = self.records
         for record in records:
-            record["auto_login"] = record["username"] in selected
+            record["auto_launch"] = record["username"] in selected
         self.config.set("accounts", records)
 
     @staticmethod
@@ -69,7 +69,7 @@ class Accounts:
 
     def get(self, identifier: str) -> str:
         username = self.resolve(identifier)
-        if self.account(username)["save_password"] != "yes":
+        if not self.account(username)["save_password"]:
             raise CredentialError(f"Account {username!r} is not set to use a saved password")
         return self.keyring_password(username)
 
@@ -104,17 +104,17 @@ class Accounts:
         username: str,
         password: str,
         *,
-        auto_login: bool = False,
-        exclusive_auto_login: bool = False,
+        auto_launch: bool | None = None,
+        exclusive_auto_launch: bool = False,
         alias: str | None = None,
-        save_password: str = "yes",
+        save_password: bool = True,
     ) -> None:
         if self.config.disabled:
             raise CredentialError("Account saving is disabled by --no-config-file")
-        if exclusive_auto_login and not auto_login:
-            raise CredentialError("Exclusive auto-login requires auto_login=True")
-        if save_password not in PASSWORD_POLICIES:
-            raise CredentialError("save_password must be ask, never, or yes")
+        if exclusive_auto_launch and not auto_launch:
+            raise CredentialError("Exclusive auto-launch requires auto_launch=True")
+        if not isinstance(save_password, bool):
+            raise CredentialError("save_password must be true or false")
         records = self.records
         previous = next((item for item in records if item["username"] == username), None)
         record = _account(
@@ -122,13 +122,16 @@ class Accounts:
             alias=alias if alias is not None else (
                 previous["alias"] if previous else None
             ),
-            auto_login=auto_login or bool(previous and previous["auto_login"]),
+            auto_launch=(
+                bool(previous and previous["auto_launch"])
+                if auto_launch is None else auto_launch
+            ),
             save_password=save_password,
         )
-        if exclusive_auto_login:
+        if exclusive_auto_launch:
             for item in records:
-                item["auto_login"] = False
-            record["auto_login"] = True
+                item["auto_launch"] = False
+            record["auto_launch"] = True
         if previous is not None:
             records = [record if item["username"] == username else item for item in records]
         else:
@@ -137,15 +140,15 @@ class Accounts:
         # Validate account data before touching the keyring.
         from .config import _validate
         _validate("accounts", records)
-        if save_password == "yes":
+        if save_password:
             self._store_password(username, password)
-        elif save_password == "never" and previous and previous["save_password"] != "never":
+        elif previous and previous["save_password"]:
             self._delete_password(username)
         self.config.set("accounts", records)
 
     def update_password(self, identifier: str, password: str) -> None:
         username = self.resolve(identifier)
-        if self.account(username)["save_password"] != "yes":
+        if not self.account(username)["save_password"]:
             raise CredentialError("Enable saved passwords for this account first")
         self._store_password(username, password)
 
@@ -157,28 +160,29 @@ class Accounts:
                 item["alias"] = alias
         self.config.set("accounts", records)
 
-    def set_password_policy(
-        self, identifier: str, policy: str, *, password: str | None = None
+    def set_password_saving(
+        self, identifier: str, enabled: bool, *, password: str | None = None
     ) -> None:
         username = self.resolve(identifier)
-        if policy not in PASSWORD_POLICIES:
-            raise CredentialError("Password policy must be ask, never, or yes")
-        if policy == "yes":
+        if not isinstance(enabled, bool):
+            raise CredentialError("Password saving must be true or false")
+        if enabled:
             if password is not None:
                 self._store_password(username, password)
             else:
                 self.keyring_password(username)
-        elif policy == "never" and self.account(username)["save_password"] != "never":
+        else:
+            # Remove any old credential even for migrated ask/never policies.
             self._delete_password(username)
         records = self.records
         for item in records:
             if item["username"] == username:
-                item["save_password"] = policy
+                item["save_password"] = enabled
         self.config.set("accounts", records)
 
     def remove(self, identifier: str) -> None:
         username = self.resolve(identifier)
-        if self.account(username)["save_password"] != "never":
+        if self.account(username)["save_password"]:
             self._delete_password(username)
         remaining = [item for item in self.records if item["username"] != username]
         self.config.set("accounts", remaining)

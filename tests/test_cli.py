@@ -164,11 +164,20 @@ def test_explicit_flags_override_saved_settings(tmp_path, monkeypatch):
     assert updated == []  # stored skip_update setting remains effective
 
 
-def test_never_ask_again_is_persistent(tmp_path, monkeypatch):
+def test_declining_remember_account_skips_all_wizard_questions(tmp_path, monkeypatch):
     settings = Config(tmp_path / "config.json")
     saved = Accounts(settings)
     monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
-    monkeypatch.setattr("gttrl.cli._select", lambda *args: "never")
+    questions = []
+    monkeypatch.setattr(
+        "gttrl.cli._yes_no",
+        lambda question: questions.append(question) or False,
+    )
+    monkeypatch.setattr(
+        "gttrl.cli._prompt_optional_alias",
+        lambda: pytest.fail("Do not prompt for alias after No"),
+    )
     monkeypatch.setattr(saved, "add", lambda *args, **kwargs: pytest.fail("Should not save"))
     _ask_save(settings, saved, "toon", "password")
-    assert Config(settings.path).get("account_wizard") is False
+    assert Config(settings.path).get("account_wizard") is True
+    assert questions == ["Remember this account?"]

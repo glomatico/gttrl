@@ -37,13 +37,13 @@ def test_interactive_accounts_table(monkeypatch):
     console = Console(file=buffer, width=80, force_terminal=True, color_system=None)
     monkeypatch.setattr(ui, "console", lambda *, stderr=False: console)
     ui.accounts_list(
-        ["my[toon]", "other"], auto_login=True
+        ["my[toon]", "other"], auto_launch_accounts=["my[toon]"]
     )
     output = buffer.getvalue()
     assert "Saved Accounts" in output
     assert "my[toon]" in output
     assert "other" in output
-    assert "Auto-login: on" in output
+    assert "Auto-launch: on" in output
 
 
 def test_script_friendly_account_listing(tmp_path):
@@ -56,7 +56,7 @@ def test_script_friendly_account_listing(tmp_path):
         "accounts", "--config-path", str(path), "list"
     ])
     assert result.exit_code == 0, result.output
-    assert result.output == "toon1\ntoon2\nAuto-login: off\n"
+    assert result.output == "toon1\ntoon2\nAuto-launch: off\n"
     assert "\x1b[" not in result.output
 
 
