@@ -31,6 +31,18 @@ class DefaultPlayGroup(click.Group):
         return super().parse_args(ctx, args)
 
 
+class LoginModeChoice(click.Choice):
+    """Keep the v1 spelling valid without cluttering the new help output."""
+
+    def __init__(self):
+        super().__init__(["auto", "credentials", "play-cookie"], case_sensitive=False)
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, str) and value.casefold() == "playcookieandgameserver":
+            return "playcookieandgameserver"
+        return super().convert(value, param, ctx)
+
+
 def _interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
@@ -54,6 +66,14 @@ def _select(message: str, choices: list[tuple[str, str]]) -> str:
     if result is None:
         raise click.Abort()
     return result
+
+
+def _session_value(value: str | None, label: str, *, secret: bool = False) -> str:
+    """Use a supplied session value or ask for the missing one."""
+    value = value or _prompt_text(label, password=secret)
+    if not value.strip():
+        raise click.UsageError(f"{label} cannot be empty")
+    return value
 
 
 def _ask_save(config: Config, accounts: Accounts, username: str, password: str) -> None:
@@ -127,7 +147,14 @@ def main() -> None:
 @click.option("--no-saved-login", is_flag=True, help="Ignore remembered accounts for this launch.")
 @click.option("--play-cookie", help="Use an externally supplied play cookie.")
 @click.option("--game-server", help="Game server for a supplied play cookie.")
-@click.option("--login-mode", type=click.Choice(["credentials", "playcookieandgameserver"]), hidden=True)
+@click.option(
+    "--login-mode",
+    type=LoginModeChoice(),
+    default="auto",
+    show_default=True,
+    help="Authentication method. 'auto' infers it from supplied options; "
+    "'playcookieandgameserver' is a legacy alias for 'play-cookie'.",
+)
 @click.option("--print-play-cookie-and-game-server", is_flag=True, help="Print sensitive launch credentials and exit.")
 @click.option(
     "--skip-update/--check-update",
@@ -162,23 +189,34 @@ def play(
     no_config_file: bool,
 ) -> None:
     """Authenticate, update if necessary, and launch the game."""
-    if password_stdin and password:
-        raise click.UsageError("--password and --password-stdin cannot be combined")
-    if password_stdin:
-        password = sys.stdin.readline().rstrip("\r\n")
-        if not password:
-            raise click.UsageError("No password was provided on standard input")
-    if login_mode:
-        ui.warning("--login-mode is deprecated; authentication is now automatic.")
-        if login_mode == "playcookieandgameserver" and not (play_cookie or game_server):
-            raise click.UsageError("This mode needs --play-cookie and --game-server")
-        if login_mode == "credentials" and (play_cookie or game_server):
-            raise click.UsageError("Credential login cannot use play-cookie arguments")
-    if bool(play_cookie) != bool(game_server):
-        raise click.UsageError("--play-cookie and --game-server must be supplied together")
-    session_login = bool(play_cookie)
-    if session_login and (username or password or password_stdin or account or choose_account or no_saved_login):
-        raise click.UsageError("A play cookie cannot be combined with account login options")
+    if login_mode == "playcookieandgameserver":
+        ui.warning("Use --login-mode play-cookie instead of the legacy mode name.")
+    session_login = (
+        login_mode in {"play-cookie", "playcookieandgameserver"}
+        or (
+            login_mode == "auto"
+            and (play_cookie is not None or game_server is not None)
+        )
+    )
+    if session_login:
+        if any((
+            username is not None, password is not None, password_stdin,
+            account is not None, choose_account, no_saved_login,
+        )):
+            raise click.UsageError("Play-cookie login cannot be combined with account login options")
+        play_cookie = _session_value(play_cookie, "Play cookie", secret=True)
+        game_server = _session_value(game_server, "Game server")
+    else:
+        if play_cookie is not None or game_server is not None:
+            raise click.UsageError(
+                "Credential login cannot use --play-cookie or --game-server"
+            )
+        if password_stdin and password is not None:
+            raise click.UsageError("--password and --password-stdin cannot be combined")
+        if password_stdin:
+            password = sys.stdin.readline().rstrip("\r\n")
+            if not password:
+                raise click.UsageError("No password was provided on standard input")
     config = Config(config_path, disabled=no_config_file)
     launcher = Launcher(
         game_dir_path or Path(config.get("game_dir_path")),

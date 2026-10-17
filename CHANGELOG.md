@@ -3,6 +3,8 @@
 ## 2.0.0 (unreleased)
 
 - Redesign CLI around `gttrl`, `gttrl play`, `gttrl accounts`, and `gttrl config`.
+- Restore an explicit `--login-mode` selector alongside automatic detection;
+  prompt for missing play-cookie or game-server values when interactive.
 - Add securely remembered accounts with separate auto-login and save-prompt preferences.
 - Implement repeated 2FA challenges, queue updates, and dynamic manifest selection.
 - Add three concurrent, verified and atomic game file downloads (configurable).

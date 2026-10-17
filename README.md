@@ -74,13 +74,26 @@ gttrl accounts clear
 gttrl play --username myuser                   # Prompt for password
 gttrl play --username myuser --password-stdin  # Read password from stdin
 gttrl play --play-cookie COOKIE --game-server HOST
+gttrl play --login-mode play-cookie             # Prompt for both session values
+gttrl play --game-server HOST                   # Prompt for the missing play cookie
+gttrl play --play-cookie COOKIE                 # Prompt for the missing game server
+gttrl play --login-mode credentials             # Explicit account login
 ```
 
 For scripts, supply the password through a secure pipe or the system keyring. Avoid `--password` whenever possible, since command-line arguments and shell history can expose secrets.
 
 Play cookies are temporary game-launch credentials, **not** reusable login tokens. They are never saved by GTTRL. The `--print-play-cookie-and-game-server` option explicitly prints sensitive session credentials; take care when redirecting its output.
 
-The old `--login-mode` option is deprecated in GTTRL 2.0. Authentication is selected automatically based on the supplied options.
+The `--login-mode` option accepts `auto` (default), `credentials`, and
+`play-cookie`. In automatic mode, providing either `--play-cookie` or
+`--game-server` selects play-cookie login; any missing value is requested
+interactively. Using `--login-mode play-cookie` prompts for both values if
+neither was provided. The old `playcookieandgameserver` name remains accepted
+as a legacy alias.
+
+Account login options and play-cookie options cannot be mixed. In scripts
+without an interactive terminal, missing values produce a clear error rather
+than attempting to prompt.
 
 ## Updating the game
 
