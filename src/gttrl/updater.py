@@ -9,7 +9,7 @@ import os
 import re
 import tempfile
 from pathlib import Path, PurePosixPath
-from urllib.parse import quote, urljoin, urlsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import aiofiles
 import click
@@ -118,7 +118,13 @@ class Updater:
                 if self.host_os not in targets:
                     continue
                 path = _safe_destination(self.game_dir, name)
-                remote = str(_safe_relative_path(info.get("dl")))
+                encoded_name = info.get("dl")
+                if not isinstance(encoded_name, str):
+                    raise click.ClickException(f"Invalid download filename for {name}")
+                # The TTR manifest already URL-encodes names with spaces.
+                # Decode once, validate the result, then quote exactly once
+                # when constructing the patch URL.
+                remote = str(_safe_relative_path(unquote(encoded_name)))
                 expected = info.get("hash")
                 if not isinstance(expected, str) or not SHA1_PATTERN.fullmatch(expected):
                     raise click.ClickException(f"Invalid SHA-1 for {name}")

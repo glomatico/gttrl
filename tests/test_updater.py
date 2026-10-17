@@ -60,6 +60,39 @@ async def test_verified_download_and_repeated_run(tmp_path):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_percent_encoded_manifest_filename_is_not_double_encoded(tmp_path):
+    data = b"toontown macOS executable"
+    digest = hashlib.sha1(data).hexdigest()
+    respx.get(MANIFEST).mock(return_value=Response(200, json={
+        "Toontown Rewritten": {
+            "only": ["darwin"],
+            "dl": "Toontown%20Rewritten.1234.bz2",
+            "hash": digest,
+        }
+    }))
+    encoded = respx.get(DOWNLOAD + "Toontown%20Rewritten.1234.bz2").mock(
+        return_value=Response(200, content=bz2.compress(data))
+    )
+    assert await Updater(tmp_path, "darwin").update(show_progress=False) == 1
+    assert (tmp_path / "Toontown Rewritten").read_bytes() == data
+    assert encoded.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_encoded_path_traversal_is_rejected(tmp_path):
+    respx.get(MANIFEST).mock(return_value=Response(200, json={
+        "phase.mf": {
+            "only": ["linux"], "dl": "%2e%2e%2fsecret.bz2",
+            "hash": hashlib.sha1(b"data").hexdigest(),
+        }
+    }))
+    with pytest.raises(click.ClickException, match="Unsafe filename"):
+        await Updater(tmp_path, "linux").update(show_progress=False)
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_corrupt_download_preserves_previous_file(tmp_path):
     existing = tmp_path / "phase.mf"
     existing.write_bytes(b"old-game-file")
