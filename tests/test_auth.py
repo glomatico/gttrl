@@ -57,3 +57,14 @@ def test_bad_login_response(response):
         pytest.raises(LoginError),
     ):
         auth.login("user", "password")
+
+
+def test_invalid_manifest_from_login():
+    with (
+        httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(
+            200, json={"success": "true", "cookie": "x", "gameserver": "server", "manifest": []}
+        ))) as client,
+        AuthClient(client) as auth,
+        pytest.raises(LoginError, match="manifest"),
+    ):
+        auth.login("user", "password")

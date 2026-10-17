@@ -7,7 +7,13 @@ import pytest
 import respx
 from httpx import Response
 
-from gttrl.updater import Updater, _safe_relative_path, manifest_url, sha1_file
+from gttrl.updater import (
+    Updater,
+    _safe_destination,
+    _safe_relative_path,
+    manifest_url,
+    sha1_file,
+)
 
 MANIFEST = "https://cdn.toontownrewritten.com/content/patchmanifest.txt"
 DOWNLOAD = "https://download.toontownrewritten.com/patches/"
@@ -19,6 +25,16 @@ def test_reject_unsafe_paths():
             _safe_relative_path(path)
     with pytest.raises(click.ClickException):
         manifest_url("https://attacker.example/manifest.json")
+
+
+def test_reject_manifest_path_through_symlink(tmp_path):
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (game_dir / "linked").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(click.ClickException, match="escapes"):
+        _safe_destination(game_dir, "linked/phase.mf")
 
 
 @pytest.mark.asyncio

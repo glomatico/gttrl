@@ -29,6 +29,12 @@ class Accounts:
             backend = keyring.get_keyring()
             if backend.priority <= 0:
                 raise CredentialError("No secure OS keyring is available")
+            # Explicitly refuse optional third-party file-backed keyrings.
+            # Some keyrings.alt backends report a positive priority while
+            # storing secrets in a user-controlled (possibly plaintext) file.
+            module = type(backend).__module__
+            if module.startswith(("keyrings.alt", "keyring.backends.fail", "keyring.backends.null")):
+                raise CredentialError("An insecure or unavailable keyring was selected")
         except (errors.KeyringError, RuntimeError) as error:
             raise CredentialError(f"Secure credential storage unavailable: {error}") from error
 

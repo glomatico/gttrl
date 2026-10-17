@@ -67,7 +67,10 @@ class AuthClient:
                 server = response.get("gameserver")
                 if not isinstance(cookie, str) or not cookie or not isinstance(server, str) or not server:
                     raise LoginError("Login succeeded but the server did not provide game credentials")
-                return LoginResponse(cookie, server, response.get("manifest"))
+                manifest = response.get("manifest")
+                if manifest is not None and not isinstance(manifest, str):
+                    raise LoginError("Login succeeded but returned an invalid manifest path")
+                return LoginResponse(cookie, server, manifest)
             if state == "partial":
                 token = response.get("responseToken")
                 if not isinstance(token, str) or not token:

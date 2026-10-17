@@ -43,6 +43,14 @@ def _safe_relative_path(value: str) -> Path:
     return Path(*PurePosixPath(value).parts)
 
 
+def _safe_destination(game_dir: Path, name: str) -> Path:
+    root = game_dir.resolve()
+    destination = game_dir / _safe_relative_path(name)
+    if not destination.resolve().is_relative_to(root):
+        raise click.ClickException(f"Patch destination escapes the game directory: {name!r}")
+    return destination
+
+
 def manifest_url(manifest: str | None) -> str:
     if not manifest:
         return DEFAULT_PATCH_MANIFEST
@@ -106,7 +114,7 @@ class Updater:
                     raise click.ClickException(f"Invalid manifest entry: {name}")
                 if self.host_os not in info.get("only", []):
                     continue
-                path = self.game_dir / _safe_relative_path(name)
+                path = _safe_destination(self.game_dir, name)
                 remote = str(_safe_relative_path(info.get("dl")))
                 expected = info.get("hash")
                 if not isinstance(expected, str) or not SHA1_PATTERN.fullmatch(expected):

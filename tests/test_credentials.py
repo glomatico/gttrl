@@ -31,3 +31,12 @@ def test_no_insecure_fallback(tmp_path, monkeypatch):
     with pytest.raises(CredentialError, match="No secure OS keyring"):
         Accounts(config).add("toon", "password")
     assert config.get("accounts") == []
+
+
+def test_insecure_third_party_keyring_rejected(tmp_path, monkeypatch):
+    # A positive priority alone must not allow a plaintext keyrings.alt backend.
+    Backend = type("Plaintext", (), {"priority": 1})
+    Backend.__module__ = "keyrings.alt.file"
+    monkeypatch.setattr("gttrl.credentials.keyring.get_keyring", lambda: Backend())
+    with pytest.raises(CredentialError, match="insecure"):
+        Accounts(Config(tmp_path / "config.json")).add("toon", "secret")

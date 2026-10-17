@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import click
+import httpx
 import questionary
 
 from . import __version__
@@ -207,12 +208,8 @@ def play(
             asyncio.run(updater.update(manifest, show_progress=_interactive()))
         except (OSError, ValueError) as error:
             raise click.ClickException(f"Game update failed: {error}") from error
-        except Exception as error:
-            # Hide request internals, but provide a useful network error.
-            import httpx
-            if isinstance(error, httpx.HTTPError):
-                raise click.ClickException(f"Game update network error: {error}") from error
-            raise
+        except httpx.HTTPError as error:
+            raise click.ClickException(f"Game update network error: {error}") from error
     click.echo("Launching Toontown Rewritten...")
     launcher.launch_game(play_cookie, game_server)
 
