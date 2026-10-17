@@ -1,5 +1,11 @@
 # GTTRL
 
+[![PyPI](https://img.shields.io/pypi/v/gttrl)](https://pypi.org/project/gttrl/)
+[![Python](https://img.shields.io/pypi/pyversions/gttrl)](https://pypi.org/project/gttrl/)
+[![CI](https://github.com/glomatico/gttrl/actions/workflows/ci.yml/badge.svg)](https://github.com/glomatico/gttrl/actions/workflows/ci.yml)
+[![MIT License](https://img.shields.io/github/license/glomatico/gttrl)](https://github.com/glomatico/gttrl/blob/main/LICENSE)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/gttrl)](https://pypi.org/project/gttrl/)
+
 **A simple command-line launcher for [Toontown Rewritten](https://www.toontownrewritten.com/).**
 
 GTTRL lets you log in, keep your game up to date, and launch multiple Toons from one place. It works on **Windows, macOS, and Linux**.
