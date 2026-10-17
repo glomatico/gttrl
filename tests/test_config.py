@@ -12,9 +12,9 @@ def test_new_config_and_permissions(tmp_path):
     config = Config(path)
     assert config.get("concurrent_downloads") == 3
     assert config.get("accounts") == []
-    assert json.loads(path.read_text())["save_prompt"] == "ask"
-    config.set("save_prompt", "never")
-    assert Config(path).get("save_prompt") == "never"
+    assert json.loads(path.read_text())["account_wizard"] is True
+    config.set("account_wizard", False)
+    assert Config(path).get("account_wizard") is False
     if os.name != "nt":
         assert path.stat().st_mode & 0o777 == 0o600
 
@@ -80,19 +80,20 @@ def test_new_accounts_schema_and_validation(tmp_path):
     path = tmp_path / "config.json"
     config = Config(path)
     config.set("accounts", [
-        _account("long-email@example.com", nickname="My Toon", auto_login=True, save_password="never"),
+        _account("long-email@example.com", alias="MyToon", auto_login=True, save_password="never"),
         _account("secondary", save_password="ask"),
     ])
-    assert Config(path).get("accounts")[0]["nickname"] == "My Toon"
+    assert Config(path).get("accounts")[0]["alias"] == "MyToon"
     contents = path.read_text()
     assert '"auto_login_accounts"' not in contents
     assert '"auto_login": true' in contents
     for invalid in [
         [{"username": "abc", "password": "secret"}],
         [_account("abc", save_password="ask"), _account("abc", save_password="yes")],
-        [_account("abc", nickname="secondary"), _account("secondary")],
+        [_account("abc", alias="secondary"), _account("secondary")],
         [{**_account("abc"), "save_password": "other"}],
         [{**_account("abc"), "auto_login": "yes"}],
+        [{**_account("abc"), "alias": "two words"}],
     ]:
         with pytest.raises(ClickException):
             config.set("accounts", invalid)

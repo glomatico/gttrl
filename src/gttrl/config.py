@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -13,37 +14,40 @@ import click
 from .constants import config_path, game_dir
 
 PASSWORD_POLICIES = frozenset({"ask", "never", "yes"})
-ACCOUNT_FIELDS = frozenset({"username", "nickname", "auto_login", "save_password"})
+ACCOUNT_FIELDS = frozenset({"username", "alias", "auto_login", "save_password"})
 DEFAULTS: dict[str, Any] = {
     "game_dir_path": str(game_dir()),
     "display_game_log": False,
     "skip_update": False,
     "concurrent_downloads": 3,
     "accounts": [],
-    "default_account": None,
-    # Controls whether *unknown* users are offered registration after login.
-    "save_prompt": "ask",
+    "account_wizard": True,
 }
 
 
 def _account(
     username: str,
     *,
-    nickname: str | None = None,
+    alias: str | None = None,
     auto_login: bool = False,
     save_password: str = "ask",
 ) -> dict[str, Any]:
     if not isinstance(username, str) or not username.strip():
         raise click.ClickException("Account username must be a nonempty string")
-    if nickname is not None and (not isinstance(nickname, str) or not nickname.strip()):
-        raise click.ClickException("Account nickname must be null or nonempty text")
+    if alias is not None and (
+        not isinstance(alias, str) or not alias or any(char.isspace() for char in alias)
+        or alias.startswith("-") or "," in alias
+    ):
+        raise click.ClickException(
+            "Account alias must contain no spaces, commas or leading dashes"
+        )
     if not isinstance(auto_login, bool):
         raise click.ClickException("Account auto_login must be a boolean")
     if not isinstance(save_password, str) or save_password not in PASSWORD_POLICIES:
         raise click.ClickException("Account save_password must be ask, never, or yes")
     return {
         "username": username,
-        "nickname": nickname,
+        "alias": alias,
         "auto_login": auto_login,
         "save_password": save_password,
     }
@@ -59,33 +63,27 @@ def _validate(key: str, value: Any) -> Any:
         for item in value:
             if not isinstance(item, dict) or set(item) != ACCOUNT_FIELDS:
                 raise click.ClickException(
-                    "Each account must contain username, nickname, auto_login, "
+                    "Each account must contain username, alias, auto_login, "
                     "and save_password (no secrets)"
                 )
             accounts.append(_account(**item))
         usernames = [item["username"] for item in accounts]
         if len(usernames) != len(set(usernames)):
             raise click.ClickException("Account usernames must be unique")
-        labels = [item["nickname"] for item in accounts if item["nickname"]]
+        labels = [item["alias"] for item in accounts if item["alias"]]
         if len(labels) != len(set(labels)) or any(
-            item["nickname"] in usernames
-            and item["nickname"] != item["username"]
-            for item in accounts if item["nickname"]
+            item["alias"] in usernames
+            and item["alias"] != item["username"]
+            for item in accounts if item["alias"]
         ):
-            raise click.ClickException("Nicknames must not conflict with other accounts")
+            raise click.ClickException("Aliases must not conflict with other accounts")
         return accounts
-    if key in {"display_game_log", "skip_update"}:
+    if key in {"display_game_log", "skip_update", "account_wizard"}:
         if not isinstance(value, bool):
             raise click.ClickException(f"{key} must be true or false")
     elif key == "concurrent_downloads":
         if type(value) is not int or not 1 <= value <= 16:
             raise click.ClickException("concurrent_downloads must be between 1 and 16")
-    elif key == "save_prompt":
-        if value not in {"ask", "never"}:
-            raise click.ClickException("save_prompt must be ask or never")
-    elif key == "default_account":
-        if value is not None and not isinstance(value, str):
-            raise click.ClickException("default_account must be a username or null")
     elif key == "game_dir_path" and (not isinstance(value, str) or not value):
         raise click.ClickException("game_dir_path must be a nonempty path")
     return value
@@ -95,6 +93,7 @@ class Config:
     def __init__(self, path: Path | None = None, *, disabled: bool = False):
         self.path = path or config_path()
         self.disabled = disabled
+        self.account_wizard_override: bool | None = None
         self.data = {**DEFAULTS, "accounts": []}
         if disabled:
             return
@@ -113,6 +112,10 @@ class Config:
         for key, value in loaded.items():
             if key in DEFAULTS and key != "accounts":
                 self.data[key] = _validate(key, value)
+        # Migrate the pre-wizard global opt-out without re-prompting users who
+        # previously selected "Never ask again".
+        if "account_wizard" not in loaded and loaded.get("save_prompt") == "never":
+            self.data["account_wizard"] = False
         items = loaded.get("accounts", [])
         if not isinstance(items, list):
             raise click.ClickException("accounts must be a list")
@@ -127,9 +130,27 @@ class Config:
                 [_account(value, auto_login=value in enabled, save_password="yes") for value in items],
             )
         else:
-            self.data["accounts"] = _validate("accounts", items)
+            converted = []
+            for item in items:
+                if isinstance(item, dict) and "nickname" in item and "alias" not in item:
+                    old_nickname = item["nickname"]
+                    if isinstance(old_nickname, str):
+                        # Pre-release nicknames could contain spaces; retain
+                        # their meaning while migrating to CLI-friendly aliases.
+                        candidate = re.sub(r"[\s,]+", "_", old_nickname.strip()).lstrip("-")
+                        old_nickname = candidate or None
+                    item = {
+                        ("alias" if key == "nickname" else key): (
+                            old_nickname if key == "nickname" else value
+                        )
+                        for key, value in item.items()
+                    }
+                converted.append(item)
+            self.data["accounts"] = _validate("accounts", converted)
 
     def get(self, key: str) -> Any:
+        if key == "account_wizard" and self.account_wizard_override is not None:
+            return self.account_wizard_override
         return self.data[key]
 
     def set(self, key: str, value: Any) -> None:

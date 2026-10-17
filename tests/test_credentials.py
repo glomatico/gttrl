@@ -15,14 +15,14 @@ def test_saved_accounts_and_auto_login(tmp_path, monkeypatch):
     accounts.add("toon1", "secret1", auto_login=True)
     accounts.add("toon2", "secret2", auto_login=False)
     assert accounts.usernames == ["toon1", "toon2"]
-    assert config.get("default_account") == "toon1"
+    assert "default_account" not in config.data
     assert config.get("accounts")[0]["auto_login"] is True
     assert accounts.auto_login_accounts == ["toon1"]
     assert accounts.get("toon1") == "secret1"
     assert "secret1" not in config.path.read_text()
     accounts.remove("toon1")
     assert accounts.usernames == ["toon2"]
-    assert config.get("default_account") == "toon2"
+    assert "default_account" not in config.data
     assert config.get("accounts")[0]["auto_login"] is False
     assert passwords == {"toon2": "secret2"}
 
@@ -60,7 +60,7 @@ def test_exclusive_auto_login_replaces_selected_accounts(tmp_path, monkeypatch):
     assert accounts.auto_login_accounts == ["alice", "bob"]
     accounts.add("charlie", "third", auto_login=True, exclusive_auto_login=True)
     assert accounts.auto_login_accounts == ["charlie"]
-    assert accounts.config.get("default_account") == "charlie"
+    assert accounts.auto_login_accounts == ["charlie"]
     assert accounts.usernames == ["alice", "bob", "charlie"]
     assert passwords == {"alice": "first", "bob": "second", "charlie": "third"}
     with pytest.raises(CredentialError, match="requires auto_login"):

@@ -1,4 +1,4 @@
-"""Per-account password policy and nickname behavior."""
+"""Per-account password policy and alias behavior."""
 
 import pytest
 from click.testing import CliRunner
@@ -32,18 +32,17 @@ def keyring_stub(monkeypatch):
     return saved
 
 
-def configured(tmp_path, *, policy="yes", nickname=None, auto_login=True):
+def configured(tmp_path, *, policy="yes", alias=None, auto_login=True):
     config = Config(tmp_path / "config.json")
     config.update(
         accounts=[
             _account(
                 "complicated.address@example.com",
-                nickname=nickname,
+                alias=alias,
                 save_password=policy,
                 auto_login=auto_login,
             ),
         ],
-        default_account="complicated.address@example.com",
     )
     return config, Accounts(config)
 
@@ -61,7 +60,7 @@ class FakeAuth:
 
 
 def test_yes_policy_reads_keyring_without_prompt(tmp_path, monkeypatch, keyring_stub):
-    config, accounts = configured(tmp_path, nickname="My Toon")
+    config, accounts = configured(tmp_path, alias="MyToon")
     keyring_stub["complicated.address@example.com"] = "secret"
     monkeypatch.setattr("gttrl.cli._interactive", lambda: True)
     monkeypatch.setattr(
@@ -140,45 +139,45 @@ def test_rejected_yes_keyring_prompts_retry_and_updates_saved_secret(
     assert keyring_stub[user] == "replacement"
 
 
-def test_nicknames_resolve_and_remain_clear_of_secrets(tmp_path, keyring_stub):
-    config, accounts = configured(tmp_path, nickname="Red Toon")
+def test_aliases_resolve_and_remain_clear_of_secrets(tmp_path, keyring_stub):
+    config, accounts = configured(tmp_path, alias="RedToon")
     user = accounts.usernames[0]
-    assert accounts.resolve("Red Toon") == user
-    assert accounts.label(user) == f"Red Toon ({user})"
-    accounts.set_nickname("Red Toon", "Purple Toon")
-    assert accounts.resolve("Purple Toon") == user
-    accounts.set_auto_login(["Purple Toon"])
+    assert accounts.resolve("RedToon") == user
+    assert accounts.label(user) == f"RedToon ({user})"
+    accounts.set_alias("RedToon", "PurpleToon")
+    assert accounts.resolve("PurpleToon") == user
+    accounts.set_auto_login(["PurpleToon"])
     assert accounts.auto_login_accounts == [user]
-    assert "Purple Toon" in config.path.read_text()
+    assert "PurpleToon" in config.path.read_text()
     assert '"password":' not in config.path.read_text()
 
 
-def test_nickname_command_and_password_policy_command(
+def test_alias_command_and_password_policy_command(
     tmp_path, monkeypatch, keyring_stub
 ):
     config, accounts = configured(tmp_path, policy="yes")
     user = accounts.usernames[0]
     keyring_stub[user] = "secret"
     runner = CliRunner()
-    nickname = runner.invoke(
-        main, ["accounts", "--config-path", str(config.path), "nickname", user, "Red Toon"]
+    alias = runner.invoke(
+        main, ["accounts", "--config-path", str(config.path), "alias", user, "RedToon"]
     )
-    assert nickname.exit_code == 0, nickname.output
-    assert Accounts(Config(config.path)).resolve("Red Toon") == user
+    assert alias.exit_code == 0, alias.output
+    assert Accounts(Config(config.path)).resolve("RedToon") == user
     policy = runner.invoke(
         main, [
             "accounts", "--config-path", str(config.path),
-            "save-password", "Red Toon", "never",
+            "save-password", "RedToon", "never",
         ]
     )
     assert policy.exit_code == 0, policy.output
     assert user not in keyring_stub
     assert Accounts(Config(config.path)).account(user)["save_password"] == "never"
     cleared = runner.invoke(
-        main, ["accounts", "--config-path", str(config.path), "nickname", user, "--clear"]
+        main, ["accounts", "--config-path", str(config.path), "alias", user, "--clear"]
     )
     assert cleared.exit_code == 0, cleared.output
-    assert Accounts(Config(config.path)).account(user)["nickname"] is None
+    assert Accounts(Config(config.path)).account(user)["alias"] is None
 
 
 def test_add_without_keyring_if_never(tmp_path, monkeypatch):
@@ -196,10 +195,10 @@ def test_add_without_keyring_if_never(tmp_path, monkeypatch):
     assert accounts.usernames == []
 
 
-def test_duplicate_nicknames_cannot_be_registered(tmp_path, keyring_stub):
-    _config, accounts = configured(tmp_path, nickname="Friendly")
+def test_duplicate_aliases_cannot_be_registered(tmp_path, keyring_stub):
+    _config, accounts = configured(tmp_path, alias="Friendly")
     with pytest.raises(CredentialError):
         accounts.resolve("Unknown")
-    with pytest.raises(Exception, match="Nicknames must not conflict"):
-        accounts.add("Friendly", "pass", nickname="Another")
+    with pytest.raises(Exception, match="Aliases must not conflict"):
+        accounts.add("Friendly", "pass", alias="Another")
     assert accounts.usernames == ["complicated.address@example.com"]

@@ -33,7 +33,7 @@ class Accounts:
 
     def resolve(self, identifier: str) -> str:
         for record in self.records:
-            if identifier in {record["username"], record["nickname"]}:
+            if identifier in {record["username"], record["alias"]}:
                 return record["username"]
         raise CredentialError(f"No saved account named {identifier!r}")
 
@@ -43,8 +43,8 @@ class Accounts:
 
     def label(self, identifier: str) -> str:
         record = self.account(identifier)
-        nickname = record["nickname"]
-        return f"{nickname} ({record['username']})" if nickname else record["username"]
+        alias = record["alias"]
+        return f"{alias} ({record['username']})" if alias else record["username"]
 
     def set_auto_login(self, usernames: list[str]) -> None:
         selected = [self.resolve(username) for username in usernames]
@@ -106,7 +106,7 @@ class Accounts:
         *,
         auto_login: bool = False,
         exclusive_auto_login: bool = False,
-        nickname: str | None = None,
+        alias: str | None = None,
         save_password: str = "yes",
     ) -> None:
         if self.config.disabled:
@@ -119,8 +119,8 @@ class Accounts:
         previous = next((item for item in records if item["username"] == username), None)
         record = _account(
             username,
-            nickname=nickname if nickname is not None else (
-                previous["nickname"] if previous else None
+            alias=alias if alias is not None else (
+                previous["alias"] if previous else None
             ),
             auto_login=auto_login or bool(previous and previous["auto_login"]),
             save_password=save_password,
@@ -141,13 +141,7 @@ class Accounts:
             self._store_password(username, password)
         elif save_password == "never" and previous and previous["save_password"] != "never":
             self._delete_password(username)
-        self.config.update(
-            accounts=records,
-            default_account=(
-                username if exclusive_auto_login
-                else self.config.get("default_account") or username
-            ),
-        )
+        self.config.set("accounts", records)
 
     def update_password(self, identifier: str, password: str) -> None:
         username = self.resolve(identifier)
@@ -155,12 +149,12 @@ class Accounts:
             raise CredentialError("Enable saved passwords for this account first")
         self._store_password(username, password)
 
-    def set_nickname(self, identifier: str, nickname: str | None) -> None:
+    def set_alias(self, identifier: str, alias: str | None) -> None:
         username = self.resolve(identifier)
         records = self.records
         for item in records:
             if item["username"] == username:
-                item["nickname"] = nickname
+                item["alias"] = alias
         self.config.set("accounts", records)
 
     def set_password_policy(
@@ -187,7 +181,4 @@ class Accounts:
         if self.account(username)["save_password"] != "never":
             self._delete_password(username)
         remaining = [item for item in self.records if item["username"] != username]
-        default = self.config.get("default_account")
-        if default == username:
-            default = remaining[0]["username"] if remaining else None
-        self.config.update(accounts=remaining, default_account=default)
+        self.config.set("accounts", remaining)
